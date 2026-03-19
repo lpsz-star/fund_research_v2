@@ -58,9 +58,9 @@
 - 单基金权重上限
 - 单基金公司暴露上限
 
-## 3. 你应该先读什么
+## 3. 阅读与文档索引
 
-如果你第一次看这个项目，建议阅读顺序如下：
+如果你第一次看这个项目，建议按下面顺序阅读：
 
 1. [AGENTS.md](/Users/liupeng/.codex/projects/fund_research_v2/AGENTS.md)
 2. [docs/architecture.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/architecture.md)
@@ -73,17 +73,13 @@
 9. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
 10. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
 
-这几份文档分别回答：
+这些文档分别覆盖：
 
-- 系统怎么分层
-- 数据表和字段长什么样
-- 当前策略口径是什么
-- 当前因子和评分口径是什么
-- 回测时序和成本假设是什么
-- 一次实验应该怎么跑、怎么比
-- 已知错误和近期变更是什么
-
-## 4. 文档索引
+- 系统分层和模块职责
+- 数据表结构与字段定义
+- 当前策略、因子与回测口径
+- 实验运行方式与可比性判断
+- 已知错误与近期变更
 
 当前 `docs/` 目录下各文档职责如下：
 
@@ -97,7 +93,7 @@
 - [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
 - [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)：主线迭代的变更记录
 
-## 5. 当前目录结构
+## 4. 当前目录结构
 
 ```text
 fund_research_v2/
@@ -119,7 +115,7 @@ fund_research_v2/
 └─ outputs/              # clean/feature/result/reports/experiments
 ```
 
-## 6. 研究主流程
+## 5. 研究主流程
 
 当前的标准研究链路是：
 
@@ -141,6 +137,84 @@ fund_research_v2/
 - 回测：[engine.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/backtest/engine.py)
 - 工作流入口：[workflows.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/workflows.py)
 
+## 6. 快速开始
+
+### 6.1 环境要求
+
+- Python `>=3.10`
+- 建议使用虚拟环境
+- 如果要运行真实数据流程，需要有效的 `tushare token`
+
+项目依赖声明位于：
+
+- [pyproject.toml](/Users/liupeng/.codex/projects/fund_research_v2/pyproject.toml)
+
+### 6.2 安装步骤
+
+首次从 GitHub 拉取仓库后，建议按下面步骤初始化环境：
+
+```bash
+git clone https://github.com/lpsz-star/fund_research_v2.git
+cd fund_research_v2
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -U pip
+pip install -e .
+```
+
+### 6.3 先跑样例流程
+
+样例流程不依赖 `tushare token`，适合先验证项目是否安装成功：
+
+```bash
+make test
+make run-sample
+```
+
+运行完成后，建议优先查看：
+
+- [outputs/reports/experiment_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
+- [outputs/reports/portfolio_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/portfolio_report.md)
+- [outputs/reports/universe_audit_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
+
+### 6.4 运行真实 `tushare` 数据流程
+
+如果要运行真实数据，请先创建本地密钥文件：
+
+- [configs/local.json](/Users/liupeng/.codex/projects/fund_research_v2/configs/local.json)
+
+文件格式如下：
+
+```json
+{
+  "tushare_token": "你的token"
+}
+```
+
+注意：
+
+- 该文件已经在 `.gitignore` 中排除，不应提交到仓库
+- `tushare` 流程会读取 [configs/tushare.json](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
+
+然后执行：
+
+```bash
+make run-tushare
+```
+
+### 6.5 常用验证命令
+
+```bash
+make help
+make test
+make run-sample
+make run-tushare
+make portfolio-tushare
+make backtest-tushare
+```
+
 ## 7. 命令说明
 
 日常使用优先通过 [Makefile](/Users/liupeng/.codex/projects/fund_research_v2/Makefile) 调用。
@@ -158,7 +232,7 @@ make help
 
 如果你需要绕过 `make`，仍然可以直接调用 CLI。
 
-### 6.1 拉取或生成数据
+### 7.1 拉取或生成数据
 
 ```bash
 make fetch-sample
@@ -170,7 +244,7 @@ make fetch-tushare
 - 当 `data_source=sample` 时，会生成样例数据并写入原始层
 - 当 `data_source=tushare` 时，会读取本地 token 并尝试抓取真实数据
 
-### 6.2 只构建基金池
+### 7.2 只构建基金池
 
 ```bash
 make universe-sample
@@ -182,7 +256,7 @@ make universe-tushare
 - `outputs/clean/fund_universe_monthly.csv`
 - `outputs/reports/universe_audit_report.md`
 
-### 6.3 计算特征
+### 7.3 计算特征
 
 ```bash
 make features-sample
@@ -193,7 +267,7 @@ make features-tushare
 
 - `outputs/feature/fund_feature_monthly.csv`
 
-### 6.4 执行排名
+### 7.4 执行排名
 
 ```bash
 make rank-sample
@@ -204,7 +278,7 @@ make rank-tushare
 
 - `outputs/result/fund_score_monthly.csv`
 
-### 6.5 生成最新组合
+### 7.5 生成最新组合
 
 ```bash
 make portfolio-sample
@@ -218,7 +292,7 @@ make portfolio-tushare
 - `outputs/reports/portfolio_report.md`
 - `outputs/reports/universe_audit_report.md`
 
-### 6.6 执行回测
+### 7.6 执行回测
 
 ```bash
 make backtest-sample
@@ -231,7 +305,7 @@ make backtest-tushare
 - `outputs/result/backtest_summary.json`
 - `outputs/reports/universe_audit_report.md`
 
-### 6.7 跑完整实验
+### 7.7 跑完整实验
 
 ```bash
 make run-sample
@@ -249,20 +323,20 @@ make run-tushare
 - Markdown 报告
 - 实验登记
 
-### 6.8 运行测试
+### 7.8 运行测试
 
 ```bash
 make test
 ```
 
-### 6.9 清理目录
+### 7.9 清理目录
 
 ```bash
 make clean-outputs
 make clean-raw
 ```
 
-### 6.10 直接调用 CLI
+### 7.10 直接调用 CLI
 
 如果你要调试某个具体入口，也可以直接运行：
 
@@ -276,9 +350,9 @@ PYTHONPATH=src python3 -m fund_research_v2 <command> --config <config_path>
 PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.json
 ```
 
-## 7. 输出目录说明
+## 8. 输出目录说明
 
-### 7.1 `data/raw/`
+### 8.1 `data/raw/`
 
 用于存放原始或接近原始的数据快照。
 
@@ -290,7 +364,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 - `benchmark_monthly.csv`
 - `dataset_snapshot.json`
 
-### 7.2 `outputs/clean/`
+### 8.2 `outputs/clean/`
 
 用于存放清洗后、结构标准化的数据。
 
@@ -302,7 +376,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 - `fund_universe_monthly.csv`
 - `benchmark_monthly.csv`
 
-### 7.3 `outputs/feature/`
+### 8.3 `outputs/feature/`
 
 用于存放特征层数据。
 
@@ -310,7 +384,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 
 - `fund_feature_monthly.csv`
 
-### 7.4 `outputs/result/`
+### 8.4 `outputs/result/`
 
 用于存放研究结果层。
 
@@ -322,7 +396,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 - `backtest_monthly.csv`
 - `backtest_summary.json`
 
-### 7.5 `outputs/reports/`
+### 8.5 `outputs/reports/`
 
 用于存放 Markdown 报告。
 
@@ -332,7 +406,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 - `experiment_report.md`
 - `backtest_report.md`
 
-### 7.6 `outputs/experiments/`
+### 8.6 `outputs/experiments/`
 
 用于存放实验登记。
 
@@ -340,7 +414,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 
 - `experiment_registry.jsonl`
 
-## 8. 配置说明
+## 9. 配置说明
 
 配置文件在 [default.json](/Users/liupeng/.codex/projects/fund_research_v2/configs/default.json)。
 
@@ -363,7 +437,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 - 组合约束是配置驱动的
 - 回测成本与 benchmark 是配置驱动的
 
-## 9. 测试
+## 10. 测试
 
 运行测试：
 
@@ -380,7 +454,7 @@ make test
 - CLI 基本入口
 - 缓存读取
 
-## 10. 当前实现中的关键约定
+## 11. 当前实现中的关键约定
 
 为了与你们的 `AGENTS.md` 保持一致，当前版本明确遵循这些默认约定：
 
@@ -392,7 +466,7 @@ make test
 - 实验结果通过 `experiment_registry.jsonl` 追踪
 
 
-## 11. 首次阅读代码建议路径
+## 12. 首次阅读代码建议路径
 
 如果你是第一次进入这个仓库，建议不要一上来就从某个因子函数开始读。更高效的方式是按“入口 -> 数据 -> 研究链路 -> 回测”的顺序看。
 
