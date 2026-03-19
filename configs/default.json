@@ -7,7 +7,6 @@
     "allowed_primary_types": ["主动股票", "偏股混合"],
     "exclude_name_keywords": ["ETF", "联接", "指数", "LOF", "FOF", "QDII", "债", "货币"],
     "min_history_months": 24,
-    "min_fund_age_months": 12,
     "min_assets_cny_mn": 200.0
   },
   "ranking": {

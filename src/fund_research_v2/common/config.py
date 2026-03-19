@@ -13,7 +13,6 @@ class UniverseConfig:
     allowed_primary_types: list[str]
     exclude_name_keywords: list[str]
     min_history_months: int
-    min_fund_age_months: int
     min_assets_cny_mn: float
 
 
@@ -96,6 +95,26 @@ class AppConfig:
     reporting: ReportingConfig
     tushare: TushareConfig
     paths: PathsConfig
+
+
+def scope_artifact_dir(base_path: Path, data_source: str) -> Path:
+    """把原始配置目录映射到按数据源隔离后的实际目录。"""
+    # sample 和 tushare 共用同一套目录名会互相覆盖产物；这里统一把数据源插入目录层级，避免调用方各自拼路径。
+    parts = list(base_path.parts)
+    if not parts:
+        return base_path / data_source
+    if "outputs" in parts:
+        index = parts.index("outputs") + 1
+        if index < len(parts) and parts[index] == data_source:
+            return base_path
+        return Path(*parts[:index], data_source, *parts[index:])
+    for index in range(len(parts) - 1):
+        if parts[index] == "data" and parts[index + 1] == "raw":
+            insert_at = index + 2
+            if insert_at < len(parts) and parts[insert_at] == data_source:
+                return base_path
+            return Path(*parts[:insert_at], data_source, *parts[insert_at:])
+    return base_path / data_source
 
 
 def load_config(path: Path) -> AppConfig:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from fund_research_v2.common.config import AppConfig
+from fund_research_v2.common.date_utils import iter_months
 from fund_research_v2.portfolio.construction import build_portfolio
 
 
@@ -19,18 +20,18 @@ def run_backtest(
     benchmark_lookup = {str(row["month"]): float(row[config.backtest.benchmark_field]) for row in benchmark_rows}
     for row in score_rows:
         scores_by_month[str(row["month"])].append(row)
-    months = sorted(scores_by_month)
-    if config.backtest.start_month:
-        months = [month for month in months if month >= config.backtest.start_month]
-    if config.backtest.end_month:
-        months = [month for month in months if month <= config.backtest.end_month]
+    available_months = sorted({str(row["month"]) for row in score_rows} | {str(row["month"]) for row in benchmark_rows})
+    if not available_months:
+        return []
+    start_month = config.backtest.start_month or available_months[0]
+    end_month = config.backtest.end_month or available_months[-1]
+    # 回测必须按完整月历推进，否则“无信号月份”会被静默跳过，导致月数、收益路径和年化口径失真。
+    months = iter_months(start_month, end_month)
     backtest_rows = []
     previous_weights: dict[str, float] = {}
     for current_month, next_month in zip(months, months[1:]):
         # 回测严格采用“本月生成信号，下一月兑现收益”的时序。
-        portfolio = build_portfolio(config, scores_by_month[current_month])
-        if not portfolio:
-            continue
+        portfolio = build_portfolio(config, scores_by_month.get(current_month, []))
         gross_return = 0.0
         current_weights = {}
         for position in portfolio:

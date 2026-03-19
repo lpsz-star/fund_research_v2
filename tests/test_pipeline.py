@@ -12,7 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from fund_research_v2.backtest.engine import run_backtest
 from fund_research_v2.cli import main
 from fund_research_v2.common.config import load_config
-from fund_research_v2.common.date_utils import is_available_by_month_end, month_end
+from fund_research_v2.common.date_utils import add_months, is_available_by_month_end, iter_months, month_end
 from fund_research_v2.common.workflows import prepare_bundle, run_experiment_command, run_portfolio_command, run_universe_command
 from fund_research_v2.data_ingestion.providers import DatasetSnapshot, load_cached_dataset
 from fund_research_v2.data_ingestion.providers import TushareDataProvider
@@ -34,7 +34,6 @@ class PipelineTest(unittest.TestCase):
                 "allowed_primary_types": ["主动股票", "偏股混合"],
                 "exclude_name_keywords": ["ETF", "联接", "指数", "LOF", "FOF", "QDII", "债", "货币"],
                 "min_history_months": 24,
-                "min_fund_age_months": 12,
                 "min_assets_cny_mn": 200.0
             },
             "ranking": {
@@ -90,6 +89,14 @@ class PipelineTest(unittest.TestCase):
         config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
         return config_path
 
+    def _scoped_output_dir(self, root: Path, data_source: str, layer: str) -> Path:
+        """返回某个数据源在 outputs 下的实际隔离目录。"""
+        return root / "outputs" / data_source / layer
+
+    def _scoped_raw_dir(self, root: Path, data_source: str) -> Path:
+        """返回某个数据源在 raw 层的实际缓存目录。"""
+        return root / "data" / "raw" / data_source
+
     def test_run_experiment_writes_outputs(self) -> None:
         """验证完整实验流程会产出 clean、feature、result 和 report 各层关键文件。"""
         root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
@@ -99,27 +106,32 @@ class PipelineTest(unittest.TestCase):
         run_experiment_command(config_path)
 
         # 这里同时检查多层输出，是为了防止某一步 silently fail 但命令仍然返回成功。
-        self.assertTrue((root / "outputs" / "clean" / "fund_universe_monthly.csv").exists())
-        self.assertTrue((root / "outputs" / "clean" / "manager_assignment_monthly.csv").exists())
-        self.assertTrue((root / "outputs" / "feature" / "fund_feature_monthly.csv").exists())
-        self.assertTrue((root / "outputs" / "result" / "fund_score_monthly.csv").exists())
-        self.assertTrue((root / "outputs" / "result" / "portfolio_target_monthly.csv").exists())
-        self.assertTrue((root / "outputs" / "result" / "portfolio_snapshot.json").exists())
-        self.assertTrue((root / "outputs" / "result" / "backtest_summary.json").exists())
-        self.assertTrue((root / "outputs" / "reports" / "portfolio_report.md").exists())
-        self.assertTrue((root / "outputs" / "reports" / "universe_audit_report.md").exists())
-        report_text = (root / "outputs" / "reports" / "experiment_report.md").read_text(encoding="utf-8")
+        self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "fund_universe_monthly.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "manager_assignment_monthly.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "dropped_entities.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "feature") / "fund_feature_monthly.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "fund_score_monthly.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "portfolio_target_monthly.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "portfolio_snapshot.json").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "backtest_summary.json").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "portfolio_report.md").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "ingestion_audit_report.md").exists())
+        report_text = (self._scoped_output_dir(root, "sample", "reports") / "experiment_report.md").read_text(encoding="utf-8")
         self.assertIn("Experiment Context", report_text)
         self.assertIn("Latest Ranking Snapshot", report_text)
         self.assertIn("Time Boundary Notes", report_text)
         self.assertIn("Backtest Summary", report_text)
-        portfolio_report = (root / "outputs" / "reports" / "portfolio_report.md").read_text(encoding="utf-8")
+        portfolio_report = (self._scoped_output_dir(root, "sample", "reports") / "portfolio_report.md").read_text(encoding="utf-8")
         self.assertIn("Decision Context", portfolio_report)
         self.assertIn("Time Boundary Notes", portfolio_report)
         self.assertIn("Selected Portfolio", portfolio_report)
-        universe_audit_report = (root / "outputs" / "reports" / "universe_audit_report.md").read_text(encoding="utf-8")
+        universe_audit_report = (self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").read_text(encoding="utf-8")
         self.assertIn("Latest Month Funnel", universe_audit_report)
         self.assertIn("Reason Counts", universe_audit_report)
+        ingestion_audit_report = (self._scoped_output_dir(root, "sample", "reports") / "ingestion_audit_report.md").read_text(encoding="utf-8")
+        self.assertIn("Ingestion Funnel", ingestion_audit_report)
+        self.assertIn("Dropped Entities", ingestion_audit_report)
 
     def test_run_portfolio_writes_outputs_without_backtest_artifacts(self) -> None:
         """验证独立组合流程不会误产出回测结果，避免命令职责边界混乱。"""
@@ -129,11 +141,11 @@ class PipelineTest(unittest.TestCase):
 
         run_portfolio_command(config_path)
 
-        self.assertTrue((root / "outputs" / "result" / "portfolio_target_monthly.csv").exists())
-        self.assertTrue((root / "outputs" / "result" / "portfolio_snapshot.json").exists())
-        self.assertTrue((root / "outputs" / "reports" / "portfolio_report.md").exists())
-        self.assertFalse((root / "outputs" / "result" / "backtest_summary.json").exists())
-        report_text = (root / "outputs" / "reports" / "portfolio_report.md").read_text(encoding="utf-8")
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "portfolio_target_monthly.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "portfolio_snapshot.json").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "portfolio_report.md").exists())
+        self.assertFalse((self._scoped_output_dir(root, "sample", "result") / "backtest_summary.json").exists())
+        report_text = (self._scoped_output_dir(root, "sample", "reports") / "portfolio_report.md").read_text(encoding="utf-8")
         self.assertIn("Top Ranked Candidates", report_text)
         self.assertIn("Time Boundary Notes", report_text)
         self.assertIn("Selected Portfolio", report_text)
@@ -147,13 +159,15 @@ class PipelineTest(unittest.TestCase):
 
         run_universe_command(config_path)
 
-        audit_report = (root / "outputs" / "reports" / "universe_audit_report.md").read_text(encoding="utf-8")
+        audit_report = (self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").read_text(encoding="utf-8")
         self.assertIn("Audit Context", audit_report)
         self.assertIn("Latest Month Funnel", audit_report)
         self.assertIn("Eligible Funds", audit_report)
+        ingestion_report = (self._scoped_output_dir(root, "sample", "reports") / "ingestion_audit_report.md").read_text(encoding="utf-8")
+        self.assertIn("Ingestion Funnel", ingestion_report)
 
     def test_universe_filters_new_fund_and_low_assets(self) -> None:
-        """验证样例数据中的新基金和小规模基金会被正确标记多个原因码。"""
+        """验证样例数据中的小规模基金仍会被规模门槛挡住，且不再依赖独立年龄门槛。"""
         root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
         self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
         config_path = self._write_config(root, self._base_config(root))
@@ -164,7 +178,7 @@ class PipelineTest(unittest.TestCase):
         reason_map = {str(row["entity_id"]): str(row["reason_codes"]) for row in latest_rows}
 
         self.assertIn("assets_below_threshold", reason_map["E007"])
-        self.assertIn("fund_too_new", reason_map["E007"])
+        self.assertNotIn("fund_too_new", reason_map["E007"])
 
     def test_universe_uses_visible_month_asset_instead_of_latest_asset(self) -> None:
         """验证基金池规模门槛使用当月可见规模，而不是实体主表中的最新规模。"""
@@ -207,7 +221,6 @@ class PipelineTest(unittest.TestCase):
         self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
         config = self._base_config(root)
         config["universe"]["min_history_months"] = 1
-        config["universe"]["min_fund_age_months"] = 1
         config["data_source"] = "sample"
         config_path = self._write_config(root, config)
 
@@ -236,13 +249,13 @@ class PipelineTest(unittest.TestCase):
         universe = build_universe(load_config(config_path), dataset)
 
         render_universe_audit_report(
-            root / "outputs" / "reports" / "universe_audit_report.md",
+            self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md",
             config=load_config(config_path),
             dataset_metadata=dataset.metadata,
             entity_rows=dataset.fund_entity_master,
             universe_rows=universe.rows,
         )
-        report_text = (root / "outputs" / "reports" / "universe_audit_report.md").read_text(encoding="utf-8")
+        report_text = (self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").read_text(encoding="utf-8")
 
         # 如果这里出现 999.0，说明报告仍在误用实体主表的最新规模字段。
         self.assertIn("visible_assets_cny_mn=120.0", report_text)
@@ -251,6 +264,8 @@ class PipelineTest(unittest.TestCase):
     def test_available_date_helpers_use_signal_month_end_boundary(self) -> None:
         """验证可得性判断严格以信号月月末为边界。"""
         self.assertEqual(month_end("2026-02"), "2026-02-28")
+        self.assertEqual(add_months("2026-01", 1), "2026-02")
+        self.assertEqual(iter_months("2026-01", "2026-03"), ["2026-01", "2026-02", "2026-03"])
         self.assertTrue(is_available_by_month_end("2026-02-28", "2026-02"))
         self.assertFalse(is_available_by_month_end("2026-03-01", "2026-02"))
 
@@ -399,6 +414,46 @@ class PipelineTest(unittest.TestCase):
 
         self.assertGreater(len(rows), 0)
         self.assertLess(rows[0]["signal_month"], rows[0]["execution_month"])
+
+    def test_backtest_uses_continuous_months_and_records_empty_portfolio_months(self) -> None:
+        """验证回测按完整月历推进，即使中间月份没有评分结果也会显式写出空仓期。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["backtest"]["start_month"] = "2026-01"
+        config_payload["backtest"]["end_month"] = "2026-03"
+        config = load_config(self._write_config(root, config_payload))
+        score_rows = [
+            {
+                "entity_id": "ONLY",
+                "month": "2026-01",
+                "entity_name": "唯一基金",
+                "fund_company": "测试基金",
+                "rank": 1,
+                "total_score": 1.0,
+            }
+        ]
+        nav_rows = [
+            {"entity_id": "ONLY", "month": "2026-02", "return_1m": 0.05},
+            {"entity_id": "ONLY", "month": "2026-03", "return_1m": -0.02},
+        ]
+        benchmark_rows = [
+            {"month": "2026-01", "benchmark_return_1m": 0.0},
+            {"month": "2026-02", "benchmark_return_1m": 0.01},
+            {"month": "2026-03", "benchmark_return_1m": 0.02},
+        ]
+
+        rows = run_backtest(config, score_rows, nav_rows, benchmark_rows)
+
+        self.assertEqual([str(row["signal_month"]) for row in rows], ["2026-01", "2026-02"])
+        self.assertEqual([str(row["execution_month"]) for row in rows], ["2026-02", "2026-03"])
+        self.assertEqual(int(rows[0]["holdings"]), 1)
+        # 2026-02 没有评分结果，因此 2026-02 -> 2026-03 应明确记录为空仓期，而不是被静默跳过。
+        self.assertEqual(int(rows[1]["holdings"]), 0)
+        # 当前组合构建会受 single_fund_cap 约束，单只基金组合默认不是满仓，因此空仓期净收益只反映卖出成本。
+        self.assertEqual(float(rows[1]["portfolio_return_net"]), -0.00015)
+        # 从持仓变为空仓意味着发生一次卖出，因此换手不应为 0。
+        self.assertEqual(float(rows[1]["turnover"]), 0.15)
 
     def test_manager_tenure_uses_real_manager_start_month(self) -> None:
         """验证样例数据中的经理任期使用真实任职起始月，而不是基金成立月近似。"""

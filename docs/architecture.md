@@ -22,7 +22,7 @@
 系统当前的标准流程如下：
 
 1. `fetch`
-   从 `sample` 或 `tushare` 数据源生成/拉取原始研究数据，并落盘到 `data/raw`
+   从 `sample` 或 `tushare` 数据源生成/拉取原始研究数据，并落盘到 `data/raw/<data_source>`
 2. `build-universe`
    按月构建基金池，输出每只基金在每个月是否可投资，以及剔除原因
 3. `compute-features`
@@ -140,6 +140,5 @@
 - benchmark：配置中的 `benchmark_return_1m`
 - 成本：固定 `transaction_cost_bps`
 - A/C 份额：默认按基金实体合并，不把份额差异当作独立 alpha 来源
-
 
 

@@ -58,6 +58,8 @@
 - 单基金权重上限
 - 单基金公司暴露上限
 
+当前默认基金池更强调“可见历史长度”和“实体规模”，不再额外使用独立的基金成立月数门槛。
+
 ## 3. 阅读与文档索引
 
 如果你第一次看这个项目，建议按下面顺序阅读：
@@ -95,6 +97,20 @@
 - [experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)：实验运行、结果阅读、可比性判断
 - [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
 - [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)：主线迭代的变更记录
+
+当前 `sample` 与 `tushare` 的产物目录已按数据源隔离：
+
+- `outputs/sample/...`
+- `outputs/tushare/...`
+
+这样做是为了避免跑完真实数据后，又被后续 `sample` 验证流程覆盖结果。
+
+接入层现在还会额外输出一份标准审计产物：
+
+- `outputs/<data_source>/reports/ingestion_audit_report.md`
+- `outputs/<data_source>/clean/dropped_entities.csv`
+
+它们专门回答“为什么 fund_basic 里看到的份额/实体，没有进入 clean 层”。
 
 ## 4. 当前目录结构
 
@@ -178,9 +194,9 @@ make run-sample
 
 运行完成后，建议优先查看：
 
-- [outputs/reports/experiment_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
-- [outputs/reports/portfolio_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/portfolio_report.md)
-- [outputs/reports/universe_audit_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
+- [outputs/sample/reports/experiment_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/experiment_report.md)
+- [outputs/sample/reports/portfolio_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/portfolio_report.md)
+- [outputs/sample/reports/universe_audit_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
 
 ### 6.4 运行真实 `tushare` 数据流程
 
@@ -262,8 +278,8 @@ make universe-tushare
 
 输出：
 
-- `outputs/clean/fund_universe_monthly.csv`
-- `outputs/reports/universe_audit_report.md`
+- `outputs/<data_source>/clean/fund_universe_monthly.csv`
+- `outputs/<data_source>/reports/universe_audit_report.md`
 
 ### 7.3 计算特征
 
@@ -274,7 +290,7 @@ make features-tushare
 
 输出：
 
-- `outputs/feature/fund_feature_monthly.csv`
+- `outputs/<data_source>/feature/fund_feature_monthly.csv`
 
 ### 7.4 执行排名
 
@@ -285,7 +301,7 @@ make rank-tushare
 
 输出：
 
-- `outputs/result/fund_score_monthly.csv`
+- `outputs/<data_source>/result/fund_score_monthly.csv`
 
 ### 7.5 生成最新组合
 
@@ -296,10 +312,10 @@ make portfolio-tushare
 
 输出：
 
-- `outputs/result/portfolio_target_monthly.csv`
-- `outputs/result/portfolio_snapshot.json`
-- `outputs/reports/portfolio_report.md`
-- `outputs/reports/universe_audit_report.md`
+- `outputs/<data_source>/result/portfolio_target_monthly.csv`
+- `outputs/<data_source>/result/portfolio_snapshot.json`
+- `outputs/<data_source>/reports/portfolio_report.md`
+- `outputs/<data_source>/reports/universe_audit_report.md`
 
 ### 7.6 执行回测
 
@@ -310,9 +326,9 @@ make backtest-tushare
 
 输出：
 
-- `outputs/result/backtest_monthly.csv`
-- `outputs/result/backtest_summary.json`
-- `outputs/reports/universe_audit_report.md`
+- `outputs/<data_source>/result/backtest_monthly.csv`
+- `outputs/<data_source>/result/backtest_summary.json`
+- `outputs/<data_source>/reports/universe_audit_report.md`
 
 ### 7.7 跑完整实验
 
@@ -361,7 +377,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 
 ## 8. 输出目录说明
 
-### 8.1 `data/raw/`
+### 8.1 `data/raw/<data_source>/`
 
 用于存放原始或接近原始的数据快照。
 
@@ -373,7 +389,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 - `benchmark_monthly.csv`
 - `dataset_snapshot.json`
 
-### 8.2 `outputs/clean/`
+### 8.2 `outputs/<data_source>/clean/`
 
 用于存放清洗后、结构标准化的数据。
 
@@ -385,7 +401,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 - `fund_universe_monthly.csv`
 - `benchmark_monthly.csv`
 
-### 8.3 `outputs/feature/`
+### 8.3 `outputs/<data_source>/feature/`
 
 用于存放特征层数据。
 
@@ -393,7 +409,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 
 - `fund_feature_monthly.csv`
 
-### 8.4 `outputs/result/`
+### 8.4 `outputs/<data_source>/result/`
 
 用于存放研究结果层。
 
@@ -405,7 +421,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 - `backtest_monthly.csv`
 - `backtest_summary.json`
 
-### 8.5 `outputs/reports/`
+### 8.5 `outputs/<data_source>/reports/`
 
 用于存放 Markdown 报告。
 
@@ -415,7 +431,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 - `experiment_report.md`
 - `backtest_report.md`
 
-### 8.6 `outputs/experiments/`
+### 8.6 `outputs/<data_source>/experiments/`
 
 用于存放实验登记。
 

@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 from fund_research_v2.backtest.engine import run_backtest
-from fund_research_v2.common.config import AppConfig, load_config, to_serializable_dict
+from fund_research_v2.common.config import AppConfig, load_config, scope_artifact_dir, to_serializable_dict
 from fund_research_v2.common.date_utils import current_timestamp
 from fund_research_v2.common.io_utils import append_jsonl, ensure_directories, write_csv, write_json
 from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, load_dataset
@@ -15,6 +15,7 @@ from fund_research_v2.ranking.scoring_engine import score_funds
 from fund_research_v2.reporting.reports import (
     render_backtest_report,
     render_experiment_report,
+    render_ingestion_audit_report,
     render_portfolio_report,
     render_universe_audit_report,
 )
@@ -42,7 +43,7 @@ def run_feature_command(config_path: Path) -> None:
     bundle = prepare_bundle(config_path)
     write_clean_outputs(bundle)
     write_universe_audit_output(bundle)
-    write_csv(bundle["project_root"] / bundle["config"].paths.feature_dir / "fund_feature_monthly.csv", bundle["feature_rows"])
+    write_csv(artifact_dir(bundle["config"], bundle["project_root"], bundle["config"].paths.feature_dir) / "fund_feature_monthly.csv", bundle["feature_rows"])
 
 
 def run_ranking_command(config_path: Path) -> None:
@@ -50,7 +51,7 @@ def run_ranking_command(config_path: Path) -> None:
     bundle = prepare_bundle(config_path)
     write_clean_outputs(bundle)
     write_universe_audit_output(bundle)
-    write_csv(bundle["project_root"] / bundle["config"].paths.result_dir / "fund_score_monthly.csv", bundle["score_rows"])
+    write_csv(artifact_dir(bundle["config"], bundle["project_root"], bundle["config"].paths.result_dir) / "fund_score_monthly.csv", bundle["score_rows"])
 
 
 def run_portfolio_command(config_path: Path) -> None:
@@ -64,8 +65,8 @@ def run_portfolio_command(config_path: Path) -> None:
     portfolio_rows = build_portfolio(config, latest_scores)
     write_clean_outputs(bundle)
     write_universe_audit_output(bundle)
-    write_csv(project_root / config.paths.feature_dir / "fund_feature_monthly.csv", bundle["feature_rows"])
-    write_csv(project_root / config.paths.result_dir / "fund_score_monthly.csv", score_rows)
+    write_csv(artifact_dir(config, project_root, config.paths.feature_dir) / "fund_feature_monthly.csv", bundle["feature_rows"])
+    write_csv(artifact_dir(config, project_root, config.paths.result_dir) / "fund_score_monthly.csv", score_rows)
     write_portfolio_outputs(bundle, latest_month, latest_scores, portfolio_rows)
 
 
@@ -127,13 +128,17 @@ def write_clean_outputs(bundle: dict[str, object]) -> None:
     dataset = bundle["dataset"]
     universe = bundle["universe"]
     # clean 层是后续所有研究步骤的共同输入，因此优先写出标准化结果而不是零散中间文件。
-    write_csv(project_root / config.paths.clean_dir / "fund_entity_master.csv", dataset.fund_entity_master)
-    write_csv(project_root / config.paths.clean_dir / "fund_share_class_map.csv", dataset.fund_share_class_map)
-    write_csv(project_root / config.paths.clean_dir / "fund_nav_monthly.csv", dataset.fund_nav_monthly)
-    write_csv(project_root / config.paths.clean_dir / "benchmark_monthly.csv", dataset.benchmark_monthly)
-    write_csv(project_root / config.paths.clean_dir / "manager_assignment_monthly.csv", dataset.manager_assignment_monthly)
-    write_csv(project_root / config.paths.clean_dir / "fund_universe_monthly.csv", universe.rows)
-    write_json(project_root / config.paths.clean_dir / "dataset_snapshot.json", dataset.metadata)
+    clean_dir = artifact_dir(config, project_root, config.paths.clean_dir)
+    write_csv(clean_dir / "fund_entity_master.csv", dataset.fund_entity_master)
+    write_csv(clean_dir / "fund_share_class_map.csv", dataset.fund_share_class_map)
+    write_csv(clean_dir / "fund_nav_monthly.csv", dataset.fund_nav_monthly)
+    write_csv(clean_dir / "benchmark_monthly.csv", dataset.benchmark_monthly)
+    write_csv(clean_dir / "manager_assignment_monthly.csv", dataset.manager_assignment_monthly)
+    write_csv(clean_dir / "fund_universe_monthly.csv", universe.rows)
+    write_json(clean_dir / "dataset_snapshot.json", dataset.metadata)
+    ingestion_audit = dataset.metadata.get("ingestion_audit", {}) if isinstance(dataset.metadata.get("ingestion_audit"), dict) else {}
+    dropped_entities = ingestion_audit.get("dropped_entities", []) if isinstance(ingestion_audit.get("dropped_entities"), list) else []
+    write_csv(clean_dir / "dropped_entities.csv", dropped_entities)
 
 
 def write_full_outputs(
@@ -151,19 +156,20 @@ def write_full_outputs(
     # 只有完整实验才同时产出 feature/result/report/experiment，这样可以把“研究快照”一次性固化下来。
     write_clean_outputs(bundle)
     write_universe_audit_output(bundle)
-    write_csv(project_root / config.paths.feature_dir / "fund_feature_monthly.csv", feature_rows)
-    write_csv(project_root / config.paths.result_dir / "fund_score_monthly.csv", score_rows)
+    write_csv(artifact_dir(config, project_root, config.paths.feature_dir) / "fund_feature_monthly.csv", feature_rows)
+    write_csv(artifact_dir(config, project_root, config.paths.result_dir) / "fund_score_monthly.csv", score_rows)
     latest_month = max((str(row["month"]) for row in score_rows), default=config.as_of_date[:7])
     latest_scores = [row for row in score_rows if str(row["month"]) == latest_month]
     if portfolio_rows:
         write_portfolio_outputs(bundle, latest_month, latest_scores, portfolio_rows)
-    write_csv(project_root / config.paths.result_dir / "backtest_monthly.csv", backtest_rows)
-    write_json(project_root / config.paths.result_dir / "backtest_summary.json", backtest_summary)
+    result_dir = artifact_dir(config, project_root, config.paths.result_dir)
+    write_csv(result_dir / "backtest_monthly.csv", backtest_rows)
+    write_json(result_dir / "backtest_summary.json", backtest_summary)
     experiment_record = build_experiment_record(config, project_root, dataset.metadata, backtest_summary, portfolio_rows)
-    append_jsonl(project_root / config.paths.experiment_dir / "experiment_registry.jsonl", experiment_record)
-    render_backtest_report(project_root / config.paths.report_dir / "backtest_report.md", backtest_rows, backtest_summary)
+    append_jsonl(artifact_dir(config, project_root, config.paths.experiment_dir) / "experiment_registry.jsonl", experiment_record)
+    render_backtest_report(artifact_dir(config, project_root, config.paths.report_dir) / "backtest_report.md", backtest_rows, backtest_summary)
     render_experiment_report(
-        project_root / config.paths.report_dir / "experiment_report.md",
+        artifact_dir(config, project_root, config.paths.report_dir) / "experiment_report.md",
         config=config,
         dataset_metadata=dataset.metadata,
         score_rows=score_rows,
@@ -183,9 +189,10 @@ def write_portfolio_outputs(
     project_root: Path = bundle["project_root"]
     dataset = bundle["dataset"]
     # 组合 CSV、快照 JSON 和 Markdown 报告必须一起刷新，否则用户会看到同一期组合对应多份不同口径的解释。
-    write_csv(project_root / config.paths.result_dir / "portfolio_target_monthly.csv", portfolio_rows)
+    result_dir = artifact_dir(config, project_root, config.paths.result_dir)
+    write_csv(result_dir / "portfolio_target_monthly.csv", portfolio_rows)
     write_json(
-        project_root / config.paths.result_dir / "portfolio_snapshot.json",
+        result_dir / "portfolio_snapshot.json",
         {
             "generated_at": current_timestamp(),
             "as_of_date": config.as_of_date,
@@ -198,7 +205,7 @@ def write_portfolio_outputs(
         },
     )
     render_portfolio_report(
-        project_root / config.paths.report_dir / "portfolio_report.md",
+        artifact_dir(config, project_root, config.paths.report_dir) / "portfolio_report.md",
         config=config,
         dataset_metadata=dataset.metadata,
         latest_month=latest_month,
@@ -214,11 +221,16 @@ def write_universe_audit_output(bundle: dict[str, object]) -> None:
     dataset = bundle["dataset"]
     universe = bundle["universe"]
     render_universe_audit_report(
-        project_root / config.paths.report_dir / "universe_audit_report.md",
+        artifact_dir(config, project_root, config.paths.report_dir) / "universe_audit_report.md",
         config=config,
         dataset_metadata=dataset.metadata,
         entity_rows=dataset.fund_entity_master,
         universe_rows=universe.rows,
+    )
+    render_ingestion_audit_report(
+        artifact_dir(config, project_root, config.paths.report_dir) / "ingestion_audit_report.md",
+        config=config,
+        dataset_metadata=dataset.metadata,
     )
 
 
@@ -239,7 +251,7 @@ def build_experiment_record(
         "git_commit": git_commit_hash(project_root),
         "portfolio_size": len(portfolio_rows),
         "backtest_summary": backtest_summary,
-        "result_dir": str(project_root / config.paths.result_dir),
+        "result_dir": str(artifact_dir(config, project_root, config.paths.result_dir)),
     }
 
 
@@ -256,13 +268,18 @@ def all_artifact_dirs(config: AppConfig, project_root: Path) -> list[Path]:
     """返回当前配置下所有需要预先创建的输出目录。"""
     # 输出目录集中声明，避免不同命令因为忘记建目录而产生“部分成功”的脏状态。
     return [
-        project_root / config.paths.raw_dir,
-        project_root / config.paths.clean_dir,
-        project_root / config.paths.feature_dir,
-        project_root / config.paths.result_dir,
-        project_root / config.paths.report_dir,
-        project_root / config.paths.experiment_dir,
+        artifact_dir(config, project_root, config.paths.raw_dir),
+        artifact_dir(config, project_root, config.paths.clean_dir),
+        artifact_dir(config, project_root, config.paths.feature_dir),
+        artifact_dir(config, project_root, config.paths.result_dir),
+        artifact_dir(config, project_root, config.paths.report_dir),
+        artifact_dir(config, project_root, config.paths.experiment_dir),
     ]
+
+
+def artifact_dir(config: AppConfig, project_root: Path, base_dir: Path) -> Path:
+    """解析某个配置目录在当前数据源下的真实目录。"""
+    return project_root / scope_artifact_dir(base_dir, config.data_source)
 
 
 def git_commit_hash(project_root: Path) -> str:

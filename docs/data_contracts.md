@@ -21,7 +21,7 @@
 
 ## 2. 数据分层
 
-### 2.1 `data/raw`
+### 2.1 `data/raw/<data_source>`
 
 原始层或接近原始层的数据缓存。
 
@@ -32,9 +32,10 @@
 - `fund_nav_monthly.csv`
 - `benchmark_monthly.csv`
 - `manager_assignment_monthly.csv`
+- `dropped_entities.csv`
 - `dataset_snapshot.json`
 
-### 2.2 `outputs/clean`
+### 2.2 `outputs/<data_source>/clean`
 
 清洗后、可供研究链路直接使用的数据。
 
@@ -47,13 +48,13 @@
 - 月频经理映射表
 - 月频基金池表
 
-### 2.3 `outputs/feature`
+### 2.3 `outputs/<data_source>/feature`
 
 特征层：
 
 - `fund_feature_monthly.csv`
 
-### 2.4 `outputs/result`
+### 2.4 `outputs/<data_source>/result`
 
 结果层：
 
@@ -62,7 +63,7 @@
 - `backtest_monthly.csv`
 - `backtest_summary.json`
 
-### 2.5 `outputs/experiments`
+### 2.5 `outputs/<data_source>/experiments`
 
 实验追踪层：
 
@@ -209,6 +210,7 @@
 - 多个原因以 `|` 拼接
 - `visible_assets_cny_mn` 是基金池规模门槛实际使用的当月可见规模
 - 审计报告解释历史月份时，应优先使用该字段，而不是 `fund_entity_master.latest_assets_cny_mn`
+- `fund_age_months` 当前保留为审计字段，不再作为默认基金池独立筛选条件
 
 ### 3.7 `fund_feature_monthly`
 

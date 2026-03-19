@@ -235,7 +235,6 @@
     - `name_keyword_excluded`
     - `no_available_nav_for_month`
     - `insufficient_history`
-    - `fund_too_new`
     - `assets_below_threshold`
 - `fund_company`
   - 含义：基金公司
@@ -245,6 +244,9 @@
 - `fund_age_months`
   - 类型：整数
   - 含义：从基金成立月到当前月份的月数差
+  - 当前用途：
+    - 保留为审计字段
+    - 当前默认基金池不再把它作为独立筛选门槛
 - `visible_assets_cny_mn`
   - 类型：浮点数
   - 单位：百万元人民币

@@ -8,7 +8,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from fund_research_v2.common.config import AppConfig
+from fund_research_v2.common.config import AppConfig, scope_artifact_dir
 from fund_research_v2.common.contracts import DatasetSnapshot
 from fund_research_v2.common.date_utils import current_timestamp
 from fund_research_v2.common.io_utils import read_csv, read_json, write_csv, write_json
@@ -47,7 +47,7 @@ def fetch_and_cache_dataset(config: AppConfig, project_root: Path) -> DatasetSna
 
 def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapshot | None:
     """从 raw 层读取已缓存的数据快照。"""
-    raw_dir = project_root / config.paths.raw_dir
+    raw_dir = project_root / scope_artifact_dir(config.paths.raw_dir, config.data_source)
     entity_path = raw_dir / "fund_entity_master.csv"
     share_path = raw_dir / "fund_share_class_map.csv"
     nav_path = raw_dir / "fund_nav_monthly.csv"
@@ -72,7 +72,7 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
 
 def persist_dataset(config: AppConfig, project_root: Path, dataset: DatasetSnapshot) -> None:
     """把统一数据契约落盘到 raw 层。"""
-    raw_dir = project_root / config.paths.raw_dir
+    raw_dir = project_root / scope_artifact_dir(config.paths.raw_dir, config.data_source)
     # raw 层按“研究内部契约”落盘，而不是保存 tushare 原始 JSON；目的是保证后续模块不依赖外部字段细节。
     write_csv(raw_dir / "fund_entity_master.csv", dataset.fund_entity_master)
     write_csv(raw_dir / "fund_share_class_map.csv", dataset.fund_share_class_map)
@@ -144,6 +144,7 @@ class TushareDataProvider:
         nav_rows: list[dict[str, object]] = []
         benchmark_rows: list[dict[str, object]] = []
         manager_rows: list[dict[str, object]] = []
+        dropped_entities: list[dict[str, object]] = []
         grouped_rows = _group_share_classes(fund_basic.to_dict("records"))
         for entity_id, rows in grouped_rows.items():
             representative_row = _select_representative_share_class(rows)
@@ -154,6 +155,18 @@ class TushareDataProvider:
             latest_assets_cny_mn, entity_nav_rows = self._fetch_entity_monthly_nav_rows(rows, entity_id)
             if not entity_nav_rows:
                 # 没有可用月频净值的基金不能进入研究层，否则后续收益窗口和回测口径都无法成立。
+                dropped_entities.append(
+                    {
+                        "entity_id": entity_id,
+                        "entity_name": _normalize_entity_name(str(representative_row.get("name") or representative_row["ts_code"])),
+                        "fund_company": str(representative_row.get("management") or "unknown"),
+                        "primary_type": _map_primary_type(str(representative_row.get("fund_type") or "")),
+                        "share_class_ids": "|".join(str(row["ts_code"]) for row in rows),
+                        "share_class_count": len(rows),
+                        "drop_reason": "no_valid_entity_monthly_nav",
+                        "representative_share_class_id": str(representative_row["ts_code"]),
+                    }
+                )
                 continue
             manager_rows.extend(self._build_manager_assignment_rows(str(representative_row["ts_code"]), entity_id, entity_nav_rows))
             normalized_name = _normalize_entity_name(str(representative_row.get("name") or representative_row["ts_code"]))
@@ -203,6 +216,14 @@ class TushareDataProvider:
                 "generated_at": current_timestamp(),
                 "entity_count": len(fund_entity_master),
                 "share_class_count": len(share_class_map),
+                "ingestion_audit": {
+                    "selected_share_class_count": len(fund_basic),
+                    "grouped_entity_count": len(grouped_rows),
+                    "retained_entity_count": len(fund_entity_master),
+                    "retained_share_class_count": len(share_class_map),
+                    "dropped_entity_count": len(dropped_entities),
+                    "dropped_entities": dropped_entities,
+                },
                 "month_range": {
                     "start": month_set[0] if month_set else None,
                     "end": month_set[-1] if month_set else None,

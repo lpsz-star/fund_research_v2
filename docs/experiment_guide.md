@@ -39,20 +39,25 @@ PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tusha
 
 运行完整实验后，当前会写出以下产物：
 
+- 当前所有产物按数据源隔离到 `outputs/<data_source>/...`
+- `sample` 默认查看 `outputs/sample/...`
+- `tushare` 默认查看 `outputs/tushare/...`
+- 若要解释 clean 层之前为什么丢掉基金，请优先查看 `ingestion_audit_report.md`
+
 ### 3.1 清洗层
 
-- [`fund_entity_master.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_entity_master.csv)
+- [`fund_entity_master.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_entity_master.csv)
 - [`fund_share_class_map.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_share_class_map.csv)
 - [`fund_nav_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_nav_monthly.csv)
 - [`benchmark_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/benchmark_monthly.csv)
 - [`manager_assignment_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/manager_assignment_monthly.csv)
 - [`fund_universe_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_universe_monthly.csv)
-- [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/dataset_snapshot.json)
+- [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/dataset_snapshot.json)
 
 ### 3.2 特征与结果层
 
-- [`fund_feature_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/feature/fund_feature_monthly.csv)
-- [`fund_score_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/fund_score_monthly.csv)
+- [`fund_feature_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/feature/fund_feature_monthly.csv)
+- [`fund_score_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/fund_score_monthly.csv)
 - [`portfolio_target_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_target_monthly.csv)
 - [`portfolio_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_snapshot.json)
 - [`backtest_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_monthly.csv)
@@ -60,14 +65,14 @@ PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tusha
 
 ### 3.3 报告层
 
-- [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/portfolio_report.md)
+- [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/portfolio_report.md)
 - [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
 - [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/backtest_report.md)
 - [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
 
 ### 3.4 实验追踪层
 
-- [`experiment_registry.jsonl`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/experiments/experiment_registry.jsonl)
+- [`experiment_registry.jsonl`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/experiments/experiment_registry.jsonl)
 
 ## 4. 如何判断两次实验是否可比
 
@@ -117,26 +122,26 @@ make run-tushare
 
 建议优先检查：
 
-- [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/dataset_snapshot.json)
-- [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
-- [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/portfolio_report.md)
-- [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_summary.json)
+- [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/clean/dataset_snapshot.json)
+- [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/universe_audit_report.md)
+- [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/portfolio_report.md)
+- [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/backtest_summary.json)
 
 ## 6. 实验阅读顺序建议
 
 如果你要理解一次实验结果，建议按以下顺序阅读：
 
-1. [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/dataset_snapshot.json)
+1. [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/dataset_snapshot.json)
    - 先确认数据源、样本范围、benchmark 和规模口径
 2. [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
    - 先确认哪些字段能解释历史月份，哪些只是最新快照
-3. [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
+3. [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
    - 确认基金池是如何收缩的
-4. [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/portfolio_report.md)
+4. [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/portfolio_report.md)
    - 看当前组合建议和未入选高分基金
-5. [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
+5. [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/experiment_report.md)
    - 看本次实验上下文与结果总览
-6. [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/backtest_report.md)
+6. [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/backtest_report.md)
    - 再看历史表现
 
 ## 6.1 读报告时必须注意的时点边界
@@ -164,6 +169,8 @@ make run-tushare
 
 - `sample` / `tushare` 缓存串仓修复后，旧结果不再可直接相信
 - 基金实体规模从“代表份额规模”修正为“实体总规模”后，旧 baseline 不再完全可比
+- 回测从“仅保留有评分月份”改为“按完整月历显式记录空仓月份”后，旧绩效摘要不再完全可比
+- 默认基金池移除独立的 `fund_age` 门槛后，旧基金池和回测 baseline 不再完全可比
 
 ## 8. 如何记录一次有效实验
 

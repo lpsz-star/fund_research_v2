@@ -105,6 +105,14 @@ def generate_sample_dataset(lookback_months: int) -> DatasetSnapshot:
             "generated_at": current_timestamp(),
             "entity_count": len(fund_entity_master),
             "share_class_count": len(share_class_map),
+            "ingestion_audit": {
+                "selected_share_class_count": len(share_class_map),
+                "grouped_entity_count": len(fund_entity_master),
+                "retained_entity_count": len(fund_entity_master),
+                "retained_share_class_count": len(share_class_map),
+                "dropped_entity_count": 0,
+                "dropped_entities": [],
+            },
             "month_range": {"start": months[0], "end": months[-1]},
             "field_status": {
                 "latest_assets_cny_mn": "realistic_sample",

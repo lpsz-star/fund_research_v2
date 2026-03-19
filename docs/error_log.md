@@ -149,3 +149,74 @@
 - 影响范围：
   - 不会改变最新代码下的规模筛选逻辑，但会显著改善历史审计解释的准确性。
 - 当前状态：已修复，并补充测试。
+
+## 9. 回测曾静默跳过无评分月份
+
+- 发现时间：2026-03-19
+- 影响模块：
+  - [`engine.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/backtest/engine.py)
+- 现象：
+  - 回测结果只保留“有评分结果的月份”，中间无信号月份会直接消失。
+  - 会出现 `2023-04 -> 2024-08` 这类跳月结果，看起来不像正常月频回测。
+- 根因：
+  - 旧实现直接使用 `score_rows` 中出现的月份序列做 `zip(months, months[1:])`。
+- 修复方案：
+  - 改为按 `backtest.start_month ~ backtest.end_month` 的完整月历推进。
+  - 无评分月份显式记为空仓期，收益记为 `0`，同时保留换手与 benchmark 对比。
+- 影响范围：
+  - 会改变回测月数。
+  - 会改变年化收益、波动率、胜率、最大回撤等统计结果。
+  - 新旧 baseline 不再完全可比。
+- 当前状态：已修复，并补充测试。
+
+## 10. `sample` 与 `tushare` 共用 outputs 导致结果被后续运行覆盖
+
+- 发现时间：2026-03-19
+- 影响模块：
+  - [`workflows.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/workflows.py)
+  - [`providers.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/data_ingestion/providers.py)
+- 现象：
+  - 明明刚跑完真实 `tushare`，但后面一轮 `sample` 验证后，`outputs/` 和 `data/raw/` 看起来又像 sample 结果。
+- 根因：
+  - 旧实现只对缓存口径做了校验，但产物目录本身没有按数据源隔离。
+- 修复方案：
+  - 把 raw 与 outputs 统一切到 `data/raw/<data_source>/...` 和 `outputs/<data_source>/...`。
+- 影响范围：
+  - 旧的未分流产物会继续留在根目录，容易造成视觉混淆。
+  - 新代码下，sample 与 tushare 产物已经互不覆盖。
+- 当前状态：已修复。
+
+## 11. 接入层缺少标准审计，导致 `80 -> 45 -> 36` 难以解释
+
+- 发现时间：2026-03-19
+- 影响模块：
+  - [`providers.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/data_ingestion/providers.py)
+  - [`workflows.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/workflows.py)
+- 现象：
+  - 用户能看到最终 clean 层数量，但看不到哪些份额/实体在接入阶段被挡掉。
+- 根因：
+  - 旧实现只保留成功进入研究快照的数据，没有把接入阶段的丢弃明细单独落盘。
+- 修复方案：
+  - 新增 `ingestion_audit_report.md` 与 `dropped_entities.csv`。
+  - 把接入层漏斗与被丢弃实体原因写入 `dataset_snapshot.metadata.ingestion_audit`。
+- 影响范围：
+  - 修复前，很多数据接入问题只能临时排查，无法稳定复盘。
+- 当前状态：已修复。
+
+## 12. `fund_age` 与 `history` 双重门槛在主线下高度重叠
+
+- 发现时间：2026-03-19
+- 影响模块：
+  - [`filters.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/universe/filters.py)
+  - 基金池配置
+- 现象：
+  - `min_history_months = 24` 与 `min_fund_age_months = 12` 同时启用时，`fund_too_new` 在真实数据里几乎没有独立筛选贡献。
+- 根因：
+  - 历史净值长度门槛已经是更强约束，导致成立月数门槛在当前主线下大多只是重复报错。
+- 修复方案：
+  - 移除默认基金池中的独立 `fund_age` 门槛。
+  - 保留 `fund_age_months` 作为审计字段。
+- 影响范围：
+  - 基金池原因码更简洁。
+  - 新旧 baseline 不再完全可比。
+- 当前状态：已修复。

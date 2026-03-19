@@ -37,6 +37,48 @@ def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], s
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def render_ingestion_audit_report(path: Path, config: AppConfig, dataset_metadata: dict[str, object]) -> None:
+    """把数据接入阶段的份额到实体漏斗写成审计报告。"""
+    audit = dataset_metadata.get("ingestion_audit", {}) if isinstance(dataset_metadata.get("ingestion_audit"), dict) else {}
+    dropped_entities = audit.get("dropped_entities", []) if isinstance(audit.get("dropped_entities"), list) else []
+    lines = [
+        "# Ingestion Audit Report",
+        "",
+        "## Audit Context",
+        "",
+        f"- as_of_date: {config.as_of_date}",
+        f"- data_source: {config.data_source}",
+        f"- dataset_source: {dataset_metadata.get('source_name', 'unknown')}",
+        f"- selected_share_class_count: {audit.get('selected_share_class_count', 'n/a')}",
+        f"- grouped_entity_count: {audit.get('grouped_entity_count', 'n/a')}",
+        f"- retained_share_class_count: {audit.get('retained_share_class_count', 'n/a')}",
+        f"- retained_entity_count: {audit.get('retained_entity_count', 'n/a')}",
+        f"- dropped_entity_count: {audit.get('dropped_entity_count', 'n/a')}",
+        "",
+        "## Ingestion Funnel",
+        "",
+        f"- 初始选中份额类: {audit.get('selected_share_class_count', 'n/a')}",
+        f"- 归并后基金实体: {audit.get('grouped_entity_count', 'n/a')}",
+        f"- 成功进入 clean 的份额类: {audit.get('retained_share_class_count', 'n/a')}",
+        f"- 成功进入 clean 的基金实体: {audit.get('retained_entity_count', 'n/a')}",
+        f"- 在 clean 层之前被丢弃的基金实体: {audit.get('dropped_entity_count', 'n/a')}",
+        "",
+        "## Dropped Entities",
+        "",
+    ]
+    for row in dropped_entities[:50]:
+        lines.append(
+            f"- {row.get('entity_name', row.get('entity_id', 'unknown'))}: "
+            f"company={row.get('fund_company', '')} "
+            f"type={row.get('primary_type', '')} "
+            f"share_class_count={row.get('share_class_count', 'n/a')} "
+            f"share_class_ids={row.get('share_class_ids', '')} "
+            f"reason={row.get('drop_reason', 'unknown')}"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def render_experiment_report(
     path: Path,
     config: AppConfig,
@@ -182,10 +224,6 @@ def render_universe_audit_report(
         entity_id for entity_id in funnel_rows[-1][1] if "insufficient_history" not in str(_latest_reason_map(latest_universe_rows).get(entity_id, "")).split("|")
     ]
     funnel_rows.append(("满足最少历史月数后", filtered_by_history))
-    filtered_by_age = [
-        entity_id for entity_id in funnel_rows[-1][1] if "fund_too_new" not in str(_latest_reason_map(latest_universe_rows).get(entity_id, "")).split("|")
-    ]
-    funnel_rows.append(("满足基金成立月数后", filtered_by_age))
     filtered_by_assets = [
         entity_id for entity_id in funnel_rows[-1][1] if "assets_below_threshold" not in str(_latest_reason_map(latest_universe_rows).get(entity_id, "")).split("|")
     ]
@@ -226,7 +264,6 @@ def render_universe_audit_report(
         f"- allowed_primary_types: {', '.join(config.universe.allowed_primary_types)}",
         f"- exclude_name_keywords: {', '.join(config.universe.exclude_name_keywords)}",
         f"- min_history_months: {config.universe.min_history_months}",
-        f"- min_fund_age_months: {config.universe.min_fund_age_months}",
         f"- min_assets_cny_mn: {config.universe.min_assets_cny_mn}",
         "",
         "## Latest Month Funnel",

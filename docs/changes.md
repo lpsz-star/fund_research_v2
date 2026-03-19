@@ -146,3 +146,37 @@
   - `experiment_guide.md` 增加月度经理映射表与时点边界阅读提示。
 - 目的：
   - 防止协作者把静态主表字段误读为历史月份口径，提升结果解释的一致性。
+
+### 18. 把回测引擎改为连续月份回放
+
+- 变更内容：
+  - 回测改为按 `start_month ~ end_month` 的完整月历推进。
+  - 无评分结果的月份不再静默跳过，而是显式记录为空仓期。
+  - 增补连续月份与空仓月份的回归测试。
+- 目的：
+  - 防止回测月数、收益路径和年化统计因“跳月”而失真。
+
+### 19. 把 raw 与 outputs 目录按数据源隔离
+
+- 变更内容：
+  - `sample` 与 `tushare` 现在分别写入 `data/raw/<data_source>/...` 与 `outputs/<data_source>/...`。
+  - 工作流、缓存读取、实验记录和测试同步适配新目录结构。
+- 目的：
+  - 防止跑完 `tushare` 后，又被后续 `sample` 验证流程覆盖产物。
+
+### 20. 新增接入层审计产物
+
+- 变更内容：
+  - 在 `dataset_snapshot.metadata` 中增加 `ingestion_audit`。
+  - clean 层新增 `dropped_entities.csv`。
+  - reports 层新增 `ingestion_audit_report.md`。
+- 目的：
+  - 把 `fund_basic -> clean` 这段漏斗标准化，直接回答“为什么某些份额/实体没进入 clean 层”。
+
+### 21. 移除默认基金池中的独立 `fund_age` 门槛
+
+- 变更内容：
+  - 删除 `min_fund_age_months` 配置与 `fund_too_new` 原因码。
+  - `fund_age_months` 仍保留在基金池输出中，仅作为审计字段。
+- 目的：
+  - 减少和 `min_history_months` 的重复约束，让基金池口径更简洁、更容易解释。

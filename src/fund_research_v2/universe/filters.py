@@ -33,8 +33,6 @@ def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnaps
                 reasons.append("no_available_nav_for_month")
             if visible_history_months < config.universe.min_history_months:
                 reasons.append("insufficient_history")
-            if fund_age_months < config.universe.min_fund_age_months:
-                reasons.append("fund_too_new")
             if current_visible_row is None or visible_assets_cny_mn < config.universe.min_assets_cny_mn:
                 reasons.append("assets_below_threshold")
             # 基金池是逐月构建的，而不是对基金打一个永久标签；同一只基金可以在不同月份进出基金池。

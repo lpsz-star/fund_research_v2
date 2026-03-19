@@ -23,6 +23,29 @@ def month_end(value: str) -> str:
     return f"{year:04d}-{month:02d}-{monthrange(year, month)[1]:02d}"
 
 
+def add_months(value: str, offset: int) -> str:
+    """对 YYYY-MM 月份做整数月偏移，返回偏移后的月份。"""
+    month_index = month_to_int(value) + offset
+    year = month_index // 12
+    month = month_index % 12
+    if month == 0:
+        year -= 1
+        month = 12
+    return f"{year:04d}-{month:02d}"
+
+
+def iter_months(start_month: str, end_month: str) -> list[str]:
+    """生成闭区间 [start_month, end_month] 内的连续月份序列。"""
+    if start_month > end_month:
+        return []
+    months = [start_month]
+    current = start_month
+    while current < end_month:
+        current = add_months(current, 1)
+        months.append(current)
+    return months
+
+
 def is_available_by_month_end(available_date: str, signal_month: str) -> bool:
     """判断一条记录在某个信号月月末之前是否已经可见。"""
     # 可得性边界统一收敛为“信号月月末”，避免不同模块各自解释 available_date。
