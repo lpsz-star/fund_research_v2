@@ -1,0 +1,211 @@
+# 实验管理说明
+
+本文档说明如何运行、记录、比较和解释一次研究实验。
+目标不是介绍所有实现细节，而是保证不同协作者在运行实验时遵循同一套最小流程。
+
+## 1. 什么是一次实验
+
+在本项目里，一次实验指的是：
+
+- 固定一份配置
+- 固定一份数据快照
+- 固定一套代码逻辑
+- 运行完整研究链路
+- 产出组合、回测、报告与实验记录
+
+这意味着：
+
+- 不是单独跑某个函数就算实验
+- 也不是手工改 CSV 再看结果
+- 而是通过标准命令生成一套可审计产物
+
+## 2. 标准实验入口
+
+当前标准完整实验命令：
+
+```bash
+make run-sample
+make run-tushare
+```
+
+对应 CLI：
+
+```bash
+PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/default.json
+PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare.json
+```
+
+## 3. 一次完整实验会产出什么
+
+运行完整实验后，当前会写出以下产物：
+
+### 3.1 清洗层
+
+- [`fund_entity_master.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_entity_master.csv)
+- [`fund_share_class_map.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_share_class_map.csv)
+- [`fund_nav_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_nav_monthly.csv)
+- [`benchmark_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/benchmark_monthly.csv)
+- [`fund_universe_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_universe_monthly.csv)
+- [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/dataset_snapshot.json)
+
+### 3.2 特征与结果层
+
+- [`fund_feature_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/feature/fund_feature_monthly.csv)
+- [`fund_score_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/fund_score_monthly.csv)
+- [`portfolio_target_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_target_monthly.csv)
+- [`portfolio_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_snapshot.json)
+- [`backtest_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_monthly.csv)
+- [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_summary.json)
+
+### 3.3 报告层
+
+- [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/portfolio_report.md)
+- [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
+- [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/backtest_report.md)
+- [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
+
+### 3.4 实验追踪层
+
+- [`experiment_registry.jsonl`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/experiments/experiment_registry.jsonl)
+
+## 4. 如何判断两次实验是否可比
+
+两次实验只有在以下条件都一致时，才适合直接比较：
+
+1. 配置一致
+2. 数据快照口径一致
+3. benchmark 一致
+4. 代码逻辑一致
+5. 成本口径一致
+
+至少要核对：
+
+- `config`
+- `dataset_snapshot`
+- `benchmark_name`
+- `benchmark_source`
+- `benchmark_ts_code`
+- `entity_asset_aggregation`
+- `backtest.transaction_cost_bps`
+
+如果其中任一项变化，都应视为“新口径实验”，不能把结果当成同一 baseline 的连续版本。
+
+## 5. 当前推荐实验流程
+
+### 5.1 首次运行 sample
+
+用于验证工程链路是否完整：
+
+```bash
+make run-sample
+```
+
+建议检查：
+
+- 报告是否全部生成
+- 测试是否通过
+- 实验登记是否写入
+
+### 5.2 运行真实数据实验
+
+使用 `tushare` 数据：
+
+```bash
+make run-tushare
+```
+
+建议优先检查：
+
+- [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/dataset_snapshot.json)
+- [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
+- [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/portfolio_report.md)
+- [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_summary.json)
+
+## 6. 实验阅读顺序建议
+
+如果你要理解一次实验结果，建议按以下顺序阅读：
+
+1. [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/dataset_snapshot.json)
+   - 先确认数据源、样本范围、benchmark 和规模口径
+2. [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
+   - 确认基金池是如何收缩的
+3. [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/portfolio_report.md)
+   - 看当前组合建议和未入选高分基金
+4. [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
+   - 看本次实验上下文与结果总览
+5. [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/backtest_report.md)
+   - 再看历史表现
+
+## 7. 什么时候必须重跑 baseline
+
+以下情况应重跑 baseline，而不是沿用旧结果：
+
+- 修改默认基金池定义
+- 修改因子定义
+- 修改评分权重
+- 修改组合约束
+- 修改 benchmark
+- 修改信号时点或执行时点
+- 修改交易成本口径
+- 修改规模字段口径
+- 修改缓存校验逻辑导致快照失效
+
+当前已经发生过的典型案例：
+
+- `sample` / `tushare` 缓存串仓修复后，旧结果不再可直接相信
+- 基金实体规模从“代表份额规模”修正为“实体总规模”后，旧 baseline 不再完全可比
+
+## 8. 如何记录一次有效实验
+
+一次有效实验至少应满足：
+
+- 命令成功执行
+- 核心报告生成完整
+- `experiment_registry.jsonl` 追加一条新记录
+- 关键配置和数据口径可追溯
+
+建议记录以下信息：
+
+- 运行日期
+- 使用配置文件
+- benchmark
+- 数据快照时间
+- 是否命中缓存
+- 是否存在已知近似口径
+- 回测摘要
+
+## 9. 当前已知实验风险
+
+### 9.1 规模字段仍非完全官方口径
+
+当前规模在部分基金上仍可能来自：
+
+- `fund_nav` 直接净资产字段
+- 或 `fund_share × nav` 的近似估算
+
+因此：
+
+- 它适合做研究筛选基线
+- 但不应直接等同于公开网站展示的官方最新规模
+
+### 9.2 当前 benchmark 仍为统一市场 benchmark
+
+当前默认使用中证800，对不同风格基金并非最细口径。
+
+### 9.3 当前实验目录不是 git 仓库
+
+因此 `experiment_registry.jsonl` 中的 `git_commit` 当前为：
+
+- `unknown`
+
+这会降低代码版本可追踪性。
+
+## 10. 后续建议
+
+建议后续补强：
+
+1. baseline 命名与版本冻结机制
+2. 实验对比脚本
+3. 配置差异自动摘要
+4. 数据快照版本号
+5. 实验失败日志与自动归档

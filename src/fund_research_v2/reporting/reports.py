@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+from collections import Counter
+from pathlib import Path
+
+from fund_research_v2.common.config import AppConfig
+
+
+def _latest_month_rows(score_rows: list[dict[str, object]], latest_month: str, limit: int) -> list[dict[str, object]]:
+    """提取最新月前 N 名评分结果，确保不同报告使用同一排序口径。"""
+    return [row for row in score_rows if str(row["month"]) == latest_month][:limit]
+
+
+def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], summary: dict[str, object]) -> None:
+    """把回测结果写成简洁的 Markdown 报告。"""
+    # 报告优先写成 Markdown，是为了让实验输出天然可版本化、可 diff，而不是锁死在 notebook 或富文本里。
+    lines = ["# Backtest Report", "", "## Summary", ""]
+    for key, value in summary.items():
+        lines.append(f"- {key}: {value}")
+    lines.extend(["", "## Monthly Results", ""])
+    for row in backtest_rows[:24]:
+        lines.append(
+            f"- {row['execution_month']}: net={row['portfolio_return_net']}, "
+            f"benchmark={row['benchmark_return']}, turnover={row['turnover']}"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def render_experiment_report(
+    path: Path,
+    config: AppConfig,
+    dataset_metadata: dict[str, object],
+    score_rows: list[dict[str, object]],
+    portfolio_rows: list[dict[str, object]],
+    backtest_summary: dict[str, object],
+) -> None:
+    """把最新月评分、组合和回测摘要写成实验报告。"""
+    latest_month = max((str(row["month"]) for row in score_rows), default="n/a")
+    # 实验报告强调“这套配置+这份数据快照产出了什么结果”，因此先交代实验上下文，再摘要展示最新月与历史表现。
+    latest_rows = _latest_month_rows(score_rows, latest_month, config.reporting.top_ranked_limit)
+    month_range = dataset_metadata.get("month_range", {}) if isinstance(dataset_metadata.get("month_range"), dict) else {}
+    lines = [
+        "# Experiment Report",
+        "",
+        "## Experiment Context",
+        "",
+        f"- as_of_date: {config.as_of_date}",
+        f"- data_source: {config.data_source}",
+        f"- latest_month: {latest_month}",
+        f"- dataset_source: {dataset_metadata.get('source_name', 'unknown')}",
+        f"- benchmark_name: {dataset_metadata.get('benchmark_name', config.benchmark.name)}",
+        f"- benchmark_source: {dataset_metadata.get('benchmark_source', config.benchmark.source)}",
+        f"- benchmark_ts_code: {dataset_metadata.get('benchmark_ts_code', config.benchmark.ts_code or 'n/a')}",
+        f"- entity_count: {dataset_metadata.get('entity_count', 'n/a')}",
+        f"- share_class_count: {dataset_metadata.get('share_class_count', 'n/a')}",
+        f"- month_range_start: {month_range.get('start', 'n/a')}",
+        f"- month_range_end: {month_range.get('end', 'n/a')}",
+        f"- candidate_count: {config.ranking.candidate_count}",
+        f"- portfolio_size: {config.portfolio.portfolio_size}",
+        f"- transaction_cost_bps: {config.backtest.transaction_cost_bps}",
+        "",
+        "## Latest Ranking Snapshot",
+        "",
+    ]
+    for row in latest_rows:
+        lines.append(
+            f"- rank {row['rank']}: {row['entity_name']} "
+            f"score={row['total_score']} perf={row['performance_quality']} "
+            f"risk={row['risk_control']} stability={row['stability_quality']}"
+        )
+    lines.extend(["", "## Latest Portfolio Snapshot", ""])
+    for row in portfolio_rows:
+        lines.append(
+            f"- {row['entity_name']}: weight={row['target_weight']} rank={row['rank']} "
+            f"company={row['fund_company']} score={row['total_score']}"
+        )
+    lines.extend(["", "## Backtest Summary", ""])
+    for key, value in backtest_summary.items():
+        lines.append(f"- {key}: {value}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def render_portfolio_report(
+    path: Path,
+    config: AppConfig,
+    dataset_metadata: dict[str, object],
+    latest_month: str,
+    latest_scores: list[dict[str, object]],
+    portfolio_rows: list[dict[str, object]],
+) -> None:
+    """把最新一期组合建议写成独立报告。"""
+    top_ranked_rows = latest_scores[: config.reporting.top_ranked_limit]
+    selected_ids = {str(row["entity_id"]) for row in portfolio_rows}
+    near_misses = [row for row in latest_scores if str(row["entity_id"]) not in selected_ids][: config.reporting.top_ranked_limit]
+    selected_companies = sorted({str(row["fund_company"]) for row in portfolio_rows})
+    lines = [
+        "# Portfolio Report",
+        "",
+        "## Decision Context",
+        "",
+        f"- as_of_date: {config.as_of_date}",
+        f"- latest_month: {latest_month}",
+        f"- data_source: {config.data_source}",
+        f"- dataset_source: {dataset_metadata.get('source_name', 'unknown')}",
+        f"- benchmark_name: {dataset_metadata.get('benchmark_name', config.benchmark.name)}",
+        f"- eligible_funds: {len(latest_scores)}",
+        f"- portfolio_size: {len(portfolio_rows)}",
+        f"- weighting_method: {config.portfolio.weighting_method}",
+        f"- single_fund_cap: {config.portfolio.single_fund_cap}",
+        f"- single_company_max: {config.portfolio.single_company_max}",
+        f"- selected_companies: {', '.join(selected_companies) if selected_companies else 'n/a'}",
+        "",
+        "## Top Ranked Candidates",
+        "",
+    ]
+    for row in top_ranked_rows:
+        lines.append(
+            f"- rank {row['rank']}: {row['entity_name']} "
+            f"score={row['total_score']} perf={row['performance_quality']} risk={row['risk_control']} stability={row['stability_quality']}"
+        )
+    lines.extend(["", "## Selected Portfolio", ""])
+    for row in portfolio_rows:
+        lines.append(
+            f"- {row['entity_name']}: weight={row['target_weight']} rank={row['rank']} "
+            f"company={row['fund_company']} score={row['total_score']}"
+        )
+    lines.extend(["", "## High Ranked But Not Selected", ""])
+    for row in near_misses:
+        lines.append(f"- rank {row['rank']}: {row['entity_name']} company={row['fund_company']} score={row['total_score']}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def render_universe_audit_report(
+    path: Path,
+    config: AppConfig,
+    dataset_metadata: dict[str, object],
+    entity_rows: list[dict[str, object]],
+    universe_rows: list[dict[str, object]],
+) -> None:
+    """把最新月基金池漏斗和剔除原因写成审计报告。"""
+    latest_month = max((str(row["month"]) for row in universe_rows), default="n/a")
+    latest_universe_rows = [row for row in universe_rows if str(row["month"]) == latest_month]
+    entity_lookup = {str(row["entity_id"]): row for row in entity_rows}
+    eligible_rows = [row for row in latest_universe_rows if int(row["is_eligible"]) == 1]
+    reason_counter: Counter[str] = Counter()
+    for row in latest_universe_rows:
+        for reason in [item for item in str(row["reason_codes"]).split("|") if item]:
+            reason_counter[reason] += 1
+
+    current_ids = [str(row["entity_id"]) for row in entity_rows]
+    funnel_rows = [
+        ("初始基金主体", current_ids),
+        (
+            "保留允许一级分类后",
+            [entity_id for entity_id in current_ids if str(entity_lookup[entity_id]["primary_type"]) in config.universe.allowed_primary_types],
+        ),
+    ]
+    filtered_by_name = [
+        entity_id
+        for entity_id in funnel_rows[-1][1]
+        if not any(keyword in str(entity_lookup[entity_id]["entity_name"]) for keyword in config.universe.exclude_name_keywords)
+    ]
+    funnel_rows.append(("剔除名称关键词后", filtered_by_name))
+    filtered_by_history = [
+        entity_id for entity_id in funnel_rows[-1][1] if "insufficient_history" not in str(_latest_reason_map(latest_universe_rows).get(entity_id, "")).split("|")
+    ]
+    funnel_rows.append(("满足最少历史月数后", filtered_by_history))
+    filtered_by_age = [
+        entity_id for entity_id in funnel_rows[-1][1] if "fund_too_new" not in str(_latest_reason_map(latest_universe_rows).get(entity_id, "")).split("|")
+    ]
+    funnel_rows.append(("满足基金成立月数后", filtered_by_age))
+    filtered_by_assets = [
+        entity_id for entity_id in funnel_rows[-1][1] if "assets_below_threshold" not in str(_latest_reason_map(latest_universe_rows).get(entity_id, "")).split("|")
+    ]
+    funnel_rows.append(("满足规模门槛后", filtered_by_assets))
+
+    asset_blocked_rows = []
+    for row in latest_universe_rows:
+        reasons = [item for item in str(row["reason_codes"]).split("|") if item]
+        if "assets_below_threshold" in reasons:
+            entity = entity_lookup.get(str(row["entity_id"]), {})
+            asset_blocked_rows.append(
+                {
+                    "entity_id": str(row["entity_id"]),
+                    "entity_name": str(entity.get("entity_name", row["entity_id"])),
+                    "primary_type": str(entity.get("primary_type", row.get("primary_type", ""))),
+                    "latest_assets_cny_mn": entity.get("latest_assets_cny_mn", "n/a"),
+                    "reason_codes": str(row["reason_codes"]),
+                }
+            )
+    asset_blocked_rows.sort(key=lambda item: float(item["latest_assets_cny_mn"]) if str(item["latest_assets_cny_mn"]).replace(".", "", 1).isdigit() else -1.0)
+
+    lines = [
+        "# Universe Audit Report",
+        "",
+        "## Audit Context",
+        "",
+        f"- as_of_date: {config.as_of_date}",
+        f"- latest_month: {latest_month}",
+        f"- data_source: {config.data_source}",
+        f"- dataset_source: {dataset_metadata.get('source_name', 'unknown')}",
+        f"- entity_count: {len(entity_rows)}",
+        f"- eligible_count: {len(eligible_rows)}",
+        f"- allowed_primary_types: {', '.join(config.universe.allowed_primary_types)}",
+        f"- exclude_name_keywords: {', '.join(config.universe.exclude_name_keywords)}",
+        f"- min_history_months: {config.universe.min_history_months}",
+        f"- min_fund_age_months: {config.universe.min_fund_age_months}",
+        f"- min_assets_cny_mn: {config.universe.min_assets_cny_mn}",
+        "",
+        "## Latest Month Funnel",
+        "",
+    ]
+    previous_count = None
+    for step_name, entity_ids in funnel_rows:
+        count = len(entity_ids)
+        drop_text = "n/a" if previous_count is None else str(previous_count - count)
+        lines.append(f"- {step_name}: count={count} dropped={drop_text}")
+        previous_count = count
+
+    lines.extend(["", "## Reason Counts", ""])
+    for reason, count in sorted(reason_counter.items(), key=lambda item: (-item[1], item[0])):
+        lines.append(f"- {reason}: {count}")
+
+    lines.extend(["", "## Eligible Funds", ""])
+    for row in sorted(eligible_rows, key=lambda item: str(item["entity_id"])):
+        entity = entity_lookup.get(str(row["entity_id"]), {})
+        lines.append(
+            f"- {entity.get('entity_name', row['entity_id'])}: "
+            f"company={entity.get('fund_company', row.get('fund_company', ''))} "
+            f"type={entity.get('primary_type', row.get('primary_type', ''))} "
+            f"assets_cny_mn={entity.get('latest_assets_cny_mn', 'n/a')}"
+        )
+
+    lines.extend(["", "## Funds Blocked By Asset Threshold", ""])
+    for row in asset_blocked_rows[:20]:
+        lines.append(
+            f"- {row['entity_name']}: type={row['primary_type']} "
+            f"assets_cny_mn={row['latest_assets_cny_mn']} reasons={row['reason_codes']}"
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _latest_reason_map(latest_universe_rows: list[dict[str, object]]) -> dict[str, str]:
+    """把最新月基金池原因码整理成按基金主体索引的映射。"""
+    return {str(row["entity_id"]): str(row["reason_codes"]) for row in latest_universe_rows}
