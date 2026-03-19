@@ -11,6 +11,7 @@ class DatasetSnapshot:
     fund_share_class_map: list[dict[str, object]]
     fund_nav_monthly: list[dict[str, object]]
     benchmark_monthly: list[dict[str, object]]
+    manager_assignment_monthly: list[dict[str, object]]
     metadata: dict[str, object]
 
 

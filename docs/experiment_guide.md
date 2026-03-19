@@ -45,6 +45,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tusha
 - [`fund_share_class_map.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_share_class_map.csv)
 - [`fund_nav_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_nav_monthly.csv)
 - [`benchmark_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/benchmark_monthly.csv)
+- [`manager_assignment_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/manager_assignment_monthly.csv)
 - [`fund_universe_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_universe_monthly.csv)
 - [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/dataset_snapshot.json)
 
@@ -127,14 +128,23 @@ make run-tushare
 
 1. [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/dataset_snapshot.json)
    - 先确认数据源、样本范围、benchmark 和规模口径
-2. [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
+2. [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
+   - 先确认哪些字段能解释历史月份，哪些只是最新快照
+3. [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
    - 确认基金池是如何收缩的
-3. [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/portfolio_report.md)
+4. [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/portfolio_report.md)
    - 看当前组合建议和未入选高分基金
-4. [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
+5. [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
    - 看本次实验上下文与结果总览
-5. [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/backtest_report.md)
+6. [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/backtest_report.md)
    - 再看历史表现
+
+## 6.1 读报告时必须注意的时点边界
+
+- `fund_entity_master` 主要解释当前实体画像，不直接解释历史月份。
+- 历史月份的规模判断，要看 `fund_universe_monthly.visible_assets_cny_mn`。
+- 历史月份的经理解释，要看 `fund_feature_monthly.manager_name` 与 `manager_tenure_months`。
+- 报告中看到的 `Time Boundary Notes` 章节，应视为阅读结果前的硬性前提。
 
 ## 7. 什么时候必须重跑 baseline
 

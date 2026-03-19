@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import datetime
 
 
@@ -13,6 +14,19 @@ def month_diff(later: str, earlier: str) -> int:
     """计算两个月份之间相差的月数。"""
     # 基金成立月数、经理任期月数这类金融语义，本质上都是月度差值而不是自然日差值。
     return month_to_int(later) - month_to_int(earlier)
+
+
+def month_end(value: str) -> str:
+    """返回某个月份对应的月末日期字符串。"""
+    year = int(value[:4])
+    month = int(value[5:7])
+    return f"{year:04d}-{month:02d}-{monthrange(year, month)[1]:02d}"
+
+
+def is_available_by_month_end(available_date: str, signal_month: str) -> bool:
+    """判断一条记录在某个信号月月末之前是否已经可见。"""
+    # 可得性边界统一收敛为“信号月月末”，避免不同模块各自解释 available_date。
+    return available_date <= month_end(signal_month)
 
 
 def current_timestamp() -> str:

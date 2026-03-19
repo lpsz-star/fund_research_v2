@@ -101,3 +101,48 @@
   - 新增 [`docs/experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
 - 目的：
   - 按 `AGENTS.md` 要求补齐字段定义、因子说明和实验管理文档，降低协作理解成本。
+
+### 13. 引入 `available_date` 驱动的净值可得性约束
+
+- 变更内容：
+  - 基金池和特征构建改为只使用 `signal_month` 月末前已可见的净值记录。
+  - 新增基金池原因码 `no_available_nav_for_month`。
+  - 增补对应回归测试与文档说明。
+- 目的：
+  - 先在净值链路上收紧前视偏差边界，避免未来才披露的数据提前进入信号月。
+
+### 14. 把 benchmark 可得性约束接入 `excess_ret_12m`
+
+- 变更内容：
+  - `benchmark_monthly` 增加 `available_date` 口径。
+  - `excess_ret_12m` 改为只使用信号月月末前已可见的 benchmark 月收益。
+- 目的：
+  - 让超额收益因子和净值链路使用同一套时间边界，避免 benchmark 侧前视偏差。
+
+### 15. 把经理任职历史映射到月频研究时间轴
+
+- 变更内容：
+  - `DatasetSnapshot` 新增 `manager_assignment_monthly`。
+  - `tushare` / `sample` 数据入口都会产出月度经理映射表。
+  - `manager_tenure_months` 改为优先使用“该月实际经理”的任职起点计算。
+  - clean 层同步落盘 `manager_assignment_monthly.csv`。
+- 目的：
+  - 避免把当前经理错误地映射到历史月份，提升经理稳定性因子的历史真实性。
+
+### 16. 把基金池规模筛选与审计解释统一为“当月可见规模”
+
+- 变更内容：
+  - `fund_universe_monthly` 新增 `visible_history_months`、`fund_age_months`、`visible_assets_cny_mn`、`nav_available_date`。
+  - 基金池规模门槛显式使用 `visible_assets_cny_mn`。
+  - `universe_audit_report` 改为展示当月可见规模，而不是实体主表中的最新规模。
+- 目的：
+  - 防止历史月份被“最新规模”错误解释，继续收紧研究时点一致性。
+
+### 17. 为报告与实验阅读补上时点边界审计说明
+
+- 变更内容：
+  - `portfolio_report` 与 `experiment_report` 新增 `Time Boundary Notes`。
+  - 新增 [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)。
+  - `experiment_guide.md` 增加月度经理映射表与时点边界阅读提示。
+- 目的：
+  - 防止协作者把静态主表字段误读为历史月份口径，提升结果解释的一致性。

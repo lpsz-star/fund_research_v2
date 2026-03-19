@@ -21,6 +21,7 @@ def generate_sample_dataset(lookback_months: int) -> DatasetSnapshot:
     share_class_map = []
     nav_rows = []
     benchmark_rows = []
+    manager_rows = []
     for entity_id, entity_name, primary_type, company, manager, inception_month, manager_start_month, assets, drift in entities:
         fund_entity_master.append(
             {
@@ -72,6 +73,16 @@ def generate_sample_dataset(lookback_months: int) -> DatasetSnapshot:
                     "assets_cny_mn": round(assets + index * 4.0, 3),
                 }
             )
+            active_manager_start = manager_start_month if manager_start_month and manager_start_month <= month else inception_month
+            manager_rows.append(
+                {
+                    "entity_id": entity_id,
+                    "month": month,
+                    "manager_name": manager,
+                    "manager_start_month": active_manager_start,
+                    "manager_end_month": "",
+                }
+            )
 
     for index, month in enumerate(months):
         # benchmark 在 sample 模式下只承担“研究链路占位”的职责，不代表真实指数收益。
@@ -79,6 +90,7 @@ def generate_sample_dataset(lookback_months: int) -> DatasetSnapshot:
             {
                 "month": month,
                 "benchmark_return_1m": round(0.009 + ((index % 5) - 2) * 0.0015, 6),
+                "available_date": f"{month}-28",
             }
         )
 
@@ -87,6 +99,7 @@ def generate_sample_dataset(lookback_months: int) -> DatasetSnapshot:
         fund_share_class_map=share_class_map,
         fund_nav_monthly=nav_rows,
         benchmark_monthly=benchmark_rows,
+        manager_assignment_monthly=manager_rows,
         metadata={
             "source_name": "sample",
             "generated_at": current_timestamp(),

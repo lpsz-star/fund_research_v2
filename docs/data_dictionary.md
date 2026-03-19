@@ -19,6 +19,9 @@
 - `available_date`
   - 格式：`YYYY-MM-DD`
   - 含义：系统认为该条数据可被研究流程看到的日期
+  - 当前用途：
+    - 用于限制某个 `signal_month` 能看到哪些净值记录
+    - 只有 `available_date <= signal_month` 月末的数据才能进入该月基金池与特征
 - `ann_date`
   - 格式：`YYYYMMDD` 或空
   - 含义：上游接口中的公告日期
@@ -190,11 +193,19 @@
 - `benchmark_return_1m`
   - 类型：浮点数
   - 含义：benchmark 当月收益
+  - 在特征计算中的使用口径：
+    - 只有 `available_date <= signal_month` 月末的 benchmark 月收益，才能进入该月 `excess_ret_12m`
 - `benchmark_close`
   - 类型：浮点数或空
   - 含义：月末收盘点位
 - `benchmark_trade_date`
   - 含义：用于代表该月的最后交易日
+- `available_date`
+  - 含义：benchmark 月收益在研究流程中可被看到的日期
+  - 当前口径：
+    - 优先使用显式字段
+    - 若不存在，则回退到 `benchmark_trade_date`
+    - 旧缓存缺失该字段时，再回退到该月月内默认日期
 - `benchmark_name`
   - 含义：benchmark 名称
 - `benchmark_ts_code`
@@ -222,13 +233,106 @@
     - `eligible`
     - `primary_type_excluded`
     - `name_keyword_excluded`
+    - `no_available_nav_for_month`
     - `insufficient_history`
     - `fund_too_new`
     - `assets_below_threshold`
 - `fund_company`
   - 含义：基金公司
+- `visible_history_months`
+  - 类型：整数
+  - 含义：截至该信号月月末、真实可见的净值历史月数
+- `fund_age_months`
+  - 类型：整数
+  - 含义：从基金成立月到当前月份的月数差
+- `visible_assets_cny_mn`
+  - 类型：浮点数
+  - 单位：百万元人民币
+  - 含义：该信号月月末前可见的实体规模
+  - 说明：
+    - 这是基金池规模门槛真正使用的字段
+    - 不等于实体主表里的 `latest_assets_cny_mn`
+- `nav_available_date`
+  - 类型：字符串或空
+  - 含义：该月净值在研究流程中变得可见的日期
 - `primary_type`
   - 含义：项目内部粗分类
+
+## 7. `manager_assignment_monthly.csv`
+
+作用：
+
+- 把基金经理任职历史展开到月频时间轴
+- 为 `manager_tenure_months` 提供“按月看当时是谁在管”的输入
+
+字段说明：
+
+- `entity_id`
+  - 含义：基金实体 ID
+- `month`
+  - 含义：该条经理映射对应的研究月份
+- `manager_name`
+  - 类型：字符串
+  - 含义：系统认定该月应使用的经理名称
+  - 当前口径：
+    - 优先取该月处于任职区间内的经理
+    - 若同月多人在任，取 `begin_date` 最近者
+- `manager_start_month`
+  - 类型：字符串
+  - 格式：`YYYY-MM`
+  - 含义：该月所使用经理的任职起始月
+- `manager_end_month`
+  - 类型：字符串或空
+  - 格式：`YYYY-MM`
+  - 含义：该经理任期结束月
+  - 缺失语义：
+    - 空值通常表示当前仍在任，或上游未提供明确离任日期
+
+## 8. `fund_feature_monthly.csv`
+
+作用：
+
+- 保存基金池通过后的月频特征结果
+
+字段说明：
+
+- `entity_id`
+  - 含义：基金实体 ID
+- `month`
+  - 含义：信号月份
+- `is_eligible`
+  - 类型：`0/1`
+  - 含义：该月是否在基金池内
+- `manager_name`
+  - 类型：字符串
+  - 含义：该月特征所绑定的经理名称
+  - 当前口径：
+    - 优先取 `manager_assignment_monthly`
+    - 若月度经理映射缺失，则回退到实体主表中的当前经理
+- `ret_3m` / `ret_6m` / `ret_12m`
+  - 类型：浮点数
+  - 含义：滚动复利收益
+  - 时间边界：
+    - 只使用 `available_date <= signal_month` 月末的净值月收益
+- `excess_ret_12m`
+  - 类型：浮点数
+  - 含义：相对 benchmark 的近 12 个月超额收益
+  - 时间边界：
+    - benchmark 也必须在信号月月末前可见
+- `vol_12m` / `downside_vol_12m` / `max_drawdown_12m`
+  - 类型：浮点数
+  - 含义：滚动风险特征
+- `manager_tenure_months`
+  - 类型：整数
+  - 含义：该月经理任期月数
+  - 当前口径：
+    - 优先使用该月经理映射的 `manager_start_month`
+    - 若缺失或异常，回退到实体主表中的 `manager_start_month`
+    - 若仍不可用，再回退到 `inception_month`
+    - 若起始月晚于当前月，不返回负数，而是继续回退或截断为 `0`
+- `asset_stability_12m`
+  - 类型：浮点数
+  - 含义：近 12 个月规模波动幅度
 
 ## 7. `fund_feature_monthly.csv`
 
@@ -246,10 +350,13 @@
 - `primary_type`
 - `ret_3m`
   - 近 3 个月复利累计收益
+  - 只基于当月月末前已可见的历史净值记录
 - `ret_6m`
   - 近 6 个月复利累计收益
+  - 只基于当月月末前已可见的历史净值记录
 - `ret_12m`
   - 近 12 个月复利累计收益
+  - 只基于当月月末前已可见的历史净值记录
 - `excess_ret_12m`
   - 近 12 个月相对 benchmark 的累计超额收益
 - `vol_12m`
@@ -262,6 +369,7 @@
   - 当前月经理任期月数
 - `asset_stability_12m`
   - 近 12 个月规模波动幅度
+  - 只基于当月月末前已可见的历史规模记录
 
 ## 8. `fund_score_monthly.csv`
 

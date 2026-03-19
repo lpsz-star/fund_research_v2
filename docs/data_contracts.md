@@ -31,6 +31,7 @@
 - `fund_share_class_map.csv`
 - `fund_nav_monthly.csv`
 - `benchmark_monthly.csv`
+- `manager_assignment_monthly.csv`
 - `dataset_snapshot.json`
 
 ### 2.2 `outputs/clean`
@@ -43,6 +44,7 @@
 - 份额映射表
 - 月频净值表
 - benchmark 月收益表
+- 月频经理映射表
 - 月频基金池表
 
 ### 2.3 `outputs/feature`
@@ -154,7 +156,33 @@
 
 - `month`
 
-### 3.5 `fund_universe_monthly`
+说明：
+
+- 若存在 `available_date`，则特征层构造 `excess_ret_12m` 时只能使用信号月月末前已可见的 benchmark 月收益。
+
+### 3.5 `manager_assignment_monthly`
+
+月频经理映射表。
+
+关键字段：
+
+- `entity_id`
+- `month`
+- `manager_name`
+- `manager_start_month`
+- `manager_end_month`
+
+主键：
+
+- `entity_id + month`
+
+当前默认口径：
+
+- 尝试把 `fund_manager` 的任职区间映射到基金实体的月频净值时间轴。
+- 若同月存在多名在任经理，当前默认取 `begin_date` 最近的一位，目的是让任期口径更接近“当月主要管理责任人”。
+- 若某月没有严格匹配到在任区间，则允许回退到“该月之前最近开始任职”的经理，避免历史接口缺口把任期字段全部打成缺失。
+
+### 3.6 `fund_universe_monthly`
 
 每月基金池快照。
 
@@ -166,6 +194,10 @@
 - `reason_codes`
 - `fund_company`
 - `primary_type`
+- `visible_history_months`
+- `fund_age_months`
+- `visible_assets_cny_mn`
+- `nav_available_date`
 
 主键：
 
@@ -175,8 +207,10 @@
 
 - `reason_codes` 用于审计为何被剔除或保留
 - 多个原因以 `|` 拼接
+- `visible_assets_cny_mn` 是基金池规模门槛实际使用的当月可见规模
+- 审计报告解释历史月份时，应优先使用该字段，而不是 `fund_entity_master.latest_assets_cny_mn`
 
-### 3.6 `fund_feature_monthly`
+### 3.7 `fund_feature_monthly`
 
 因子输入和中间特征。
 
@@ -199,7 +233,12 @@
 
 - `entity_id + month`
 
-### 3.7 `fund_score_monthly`
+说明：
+
+- `manager_tenure_months` 优先使用 `manager_assignment_monthly` 中该月真实匹配到的 `manager_start_month` 计算。
+- 只有当月度经理映射缺失时，才回退到 `fund_entity_master.manager_start_month`。
+
+### 3.8 `fund_score_monthly`
 
 月频打分结果。
 
@@ -217,7 +256,7 @@
 
 - `entity_id + month`
 
-### 3.8 `portfolio_target_monthly`
+### 3.9 `portfolio_target_monthly`
 
 某次调仓生成的组合目标权重。
 
@@ -231,7 +270,7 @@
 - `total_score`
 - `target_weight`
 
-### 3.9 `backtest_monthly`
+### 3.10 `backtest_monthly`
 
 历史回测结果。
 
@@ -280,4 +319,3 @@
 - `manager_name` 当前仍是占位值
 
 后续如果这些字段进入真实评分前，必须先补全真实数据来源与可得性定义。
-

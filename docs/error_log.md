@@ -93,3 +93,59 @@
 - 影响范围：
   - 降低协作可追踪性与变更审计质量。
 - 当前状态：已补齐。
+
+## 6. `available_date` 已落盘但未实际参与研究链路
+
+- 发现时间：2026-03-19
+- 影响模块：
+  - [`filters.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/universe/filters.py)
+  - [`feature_builder.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/features/feature_builder.py)
+- 现象：
+  - `fund_nav_monthly` 已保留 `available_date`，但基金池和特征仍直接按 `month` 全历史滚动。
+- 根因：
+  - 早期实现只把 `available_date` 当作预留字段，没有真正把它接进信号月可见性判断。
+- 修复方案：
+  - 在基金池和特征构建中统一采用“`available_date <= signal_month` 月末”规则。
+  - 对当月净值尚不可见的情况新增 `no_available_nav_for_month` 审计原因码。
+- 影响范围：
+  - 修复前会存在净值披露延迟场景下的前视偏差。
+  - 历史实验与新口径实验不再完全可比。
+- 当前状态：已修复，并补充测试。
+
+## 7. 历史月份误用当前经理，导致任期口径失真
+
+- 发现时间：2026-03-19
+- 影响模块：
+  - [`providers.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/data_ingestion/providers.py)
+  - [`feature_builder.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/features/feature_builder.py)
+- 现象：
+  - 历史月份的 `manager_tenure_months` 实际是按当前经理起始月计算，而不是按当时在任经理计算。
+  - 当基金发生换经理时，旧月份任期会被现任经理错误覆盖。
+- 根因：
+  - 早期数据契约只有实体主表中的“当前经理”字段，没有把经理任职历史展开到月频研究轴上。
+- 修复方案：
+  - 新增 `manager_assignment_monthly` 数据表。
+  - 按月匹配 `fund_manager` 任职区间，优先选当月在任经理；同月多经理时取最近开始任职者。
+  - 特征层优先使用该月经理映射计算任期，缺失时再安全回退。
+- 影响范围：
+  - 会影响 `manager_tenure_months`。
+  - 会进一步影响 `stability_quality` 与最终排序。
+  - 经理频繁更替基金的历史评分与旧版本不再可比。
+- 当前状态：已修复，并补充测试。
+
+## 8. 基金池审计曾用最新规模解释历史月份
+
+- 发现时间：2026-03-19
+- 影响模块：
+  - [`filters.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/universe/filters.py)
+  - [`reports.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/reporting/reports.py)
+- 现象：
+  - 基金池规模门槛虽然按月判断，但审计报告里仍展示 `latest_assets_cny_mn`，容易把历史月份错误理解为“当时规模已经很大/很小”。
+- 根因：
+  - 基金池结果表没有显式保存“当月可见规模”，报告只能回头取实体主表最新值解释历史。
+- 修复方案：
+  - 在 `fund_universe_monthly` 中落盘 `visible_assets_cny_mn` 等时点字段。
+  - 审计报告统一使用这些逐月字段解释基金池结果。
+- 影响范围：
+  - 不会改变最新代码下的规模筛选逻辑，但会显著改善历史审计解释的准确性。
+- 当前状态：已修复，并补充测试。

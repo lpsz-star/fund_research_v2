@@ -11,6 +11,16 @@ def _latest_month_rows(score_rows: list[dict[str, object]], latest_month: str, l
     return [row for row in score_rows if str(row["month"]) == latest_month][:limit]
 
 
+def _time_boundary_notes() -> list[str]:
+    """返回当前研究报告应重复强调的时间边界说明。"""
+    return [
+        "- 基金池规模门槛解释应优先看 `visible_assets_cny_mn`，而不是实体主表中的 `latest_assets_cny_mn`。",
+        "- 特征与评分只使用信号月月末前可见的净值和 benchmark 月收益。",
+        "- `manager_tenure_months` 优先基于 `manager_assignment_monthly` 计算；实体主表中的经理字段只代表最新快照。",
+        "- `fund_entity_master` 更适合解释最新实体画像，不适合直接回头解释历史月份状态。",
+    ]
+
+
 def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], summary: dict[str, object]) -> None:
     """把回测结果写成简洁的 Markdown 报告。"""
     # 报告优先写成 Markdown，是为了让实验输出天然可版本化、可 diff，而不是锁死在 notebook 或富文本里。
@@ -69,6 +79,8 @@ def render_experiment_report(
             f"score={row['total_score']} perf={row['performance_quality']} "
             f"risk={row['risk_control']} stability={row['stability_quality']}"
         )
+    lines.extend(["", "## Time Boundary Notes", ""])
+    lines.extend(_time_boundary_notes())
     lines.extend(["", "## Latest Portfolio Snapshot", ""])
     for row in portfolio_rows:
         lines.append(
@@ -120,6 +132,8 @@ def render_portfolio_report(
             f"- rank {row['rank']}: {row['entity_name']} "
             f"score={row['total_score']} perf={row['performance_quality']} risk={row['risk_control']} stability={row['stability_quality']}"
         )
+    lines.extend(["", "## Time Boundary Notes", ""])
+    lines.extend(_time_boundary_notes())
     lines.extend(["", "## Selected Portfolio", ""])
     for row in portfolio_rows:
         lines.append(
@@ -187,11 +201,16 @@ def render_universe_audit_report(
                     "entity_id": str(row["entity_id"]),
                     "entity_name": str(entity.get("entity_name", row["entity_id"])),
                     "primary_type": str(entity.get("primary_type", row.get("primary_type", ""))),
-                    "latest_assets_cny_mn": entity.get("latest_assets_cny_mn", "n/a"),
+                    "visible_assets_cny_mn": row.get("visible_assets_cny_mn", "n/a"),
+                    "visible_history_months": row.get("visible_history_months", "n/a"),
+                    "fund_age_months": row.get("fund_age_months", "n/a"),
+                    "nav_available_date": row.get("nav_available_date", ""),
                     "reason_codes": str(row["reason_codes"]),
                 }
             )
-    asset_blocked_rows.sort(key=lambda item: float(item["latest_assets_cny_mn"]) if str(item["latest_assets_cny_mn"]).replace(".", "", 1).isdigit() else -1.0)
+    asset_blocked_rows.sort(
+        key=lambda item: float(item["visible_assets_cny_mn"]) if str(item["visible_assets_cny_mn"]).replace(".", "", 1).isdigit() else -1.0
+    )
 
     lines = [
         "# Universe Audit Report",
@@ -231,14 +250,20 @@ def render_universe_audit_report(
             f"- {entity.get('entity_name', row['entity_id'])}: "
             f"company={entity.get('fund_company', row.get('fund_company', ''))} "
             f"type={entity.get('primary_type', row.get('primary_type', ''))} "
-            f"assets_cny_mn={entity.get('latest_assets_cny_mn', 'n/a')}"
+            f"visible_assets_cny_mn={row.get('visible_assets_cny_mn', 'n/a')} "
+            f"visible_history_months={row.get('visible_history_months', 'n/a')} "
+            f"fund_age_months={row.get('fund_age_months', 'n/a')}"
         )
 
     lines.extend(["", "## Funds Blocked By Asset Threshold", ""])
     for row in asset_blocked_rows[:20]:
         lines.append(
             f"- {row['entity_name']}: type={row['primary_type']} "
-            f"assets_cny_mn={row['latest_assets_cny_mn']} reasons={row['reason_codes']}"
+            f"visible_assets_cny_mn={row['visible_assets_cny_mn']} "
+            f"visible_history_months={row['visible_history_months']} "
+            f"fund_age_months={row['fund_age_months']} "
+            f"nav_available_date={row['nav_available_date'] or 'n/a'} "
+            f"reasons={row['reason_codes']}"
         )
 
     path.parent.mkdir(parents=True, exist_ok=True)

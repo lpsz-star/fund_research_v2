@@ -131,6 +131,7 @@ def write_clean_outputs(bundle: dict[str, object]) -> None:
     write_csv(project_root / config.paths.clean_dir / "fund_share_class_map.csv", dataset.fund_share_class_map)
     write_csv(project_root / config.paths.clean_dir / "fund_nav_monthly.csv", dataset.fund_nav_monthly)
     write_csv(project_root / config.paths.clean_dir / "benchmark_monthly.csv", dataset.benchmark_monthly)
+    write_csv(project_root / config.paths.clean_dir / "manager_assignment_monthly.csv", dataset.manager_assignment_monthly)
     write_csv(project_root / config.paths.clean_dir / "fund_universe_monthly.csv", universe.rows)
     write_json(project_root / config.paths.clean_dir / "dataset_snapshot.json", dataset.metadata)
 

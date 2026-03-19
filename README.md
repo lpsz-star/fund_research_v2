@@ -66,17 +66,19 @@
 2. [docs/architecture.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/architecture.md)
 3. [docs/data_contracts.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md)
 4. [docs/data_dictionary.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_dictionary.md)
-5. [docs/strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)
-6. [docs/factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
-7. [docs/backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
-8. [docs/experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
-9. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
-10. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
+5. [docs/time_boundary_audit.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
+6. [docs/strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)
+7. [docs/factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
+8. [docs/backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
+9. [docs/experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
+10. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
+11. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
 
 这些文档分别覆盖：
 
 - 系统分层和模块职责
 - 数据表结构与字段定义
+- 历史月份与最新快照的时点边界
 - 当前策略、因子与回测口径
 - 实验运行方式与可比性判断
 - 已知错误与近期变更
@@ -86,6 +88,7 @@
 - [architecture.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/architecture.md)：系统分层、模块职责、默认设计选择
 - [data_contracts.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md)：表级数据契约、主键与时间字段约定
 - [data_dictionary.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_dictionary.md)：字段级数据字典、单位和缺失语义
+- [time_boundary_audit.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)：哪些字段能解释历史月份，哪些字段只代表最新快照
 - [strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)：当前策略范围与研究口径
 - [factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)：当前已实现因子、合成分与评分逻辑
 - [backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)：信号时点、执行时点、成本与回测边界
@@ -229,6 +232,12 @@ make help
 
 - `sample`：使用 [default.json](/Users/liupeng/.codex/projects/fund_research_v2/configs/default.json)
 - `tushare`：使用 [tushare.json](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
+
+当前 clean / raw 层还会额外输出一张月度经理映射表：
+
+- `manager_assignment_monthly.csv`
+
+它的作用是把经理任职历史对齐到研究月份，避免用“当前经理”反向覆盖整段历史。
 
 如果你需要绕过 `make`，仍然可以直接调用 CLI。
 
@@ -464,112 +473,3 @@ make test
 - 回测采用“本月信号、下一月执行”
 - 原始输出、特征输出、结果输出分层落盘
 - 实验结果通过 `experiment_registry.jsonl` 追踪
-
-
-## 12. 首次阅读代码建议路径
-
-如果你是第一次进入这个仓库，建议不要一上来就从某个因子函数开始读。更高效的方式是按“入口 -> 数据 -> 研究链路 -> 回测”的顺序看。
-
-### 第一步：先看命令入口
-
-先读 [cli.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/cli.py)。
-
-这里回答两个最基础的问题：
-
-- 这个项目能执行哪些命令
-- 每个命令最终会调用哪条工作流
-
-如果你不知道系统是怎么跑起来的，先看这里最省时间。
-
-### 第二步：再看工作流编排
-
-接着读 [workflows.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/workflows.py)。
-
-这里是全项目最关键的“总装配层”，能看到：
-
-- 配置在哪加载
-- 数据在哪进入系统
-- 基金池、特征、排名、组合、回测是怎么串起来的
-- 输出文件写到哪里
-- 实验记录怎么生成
-
-如果只能选一个文件先看，优先看这个。
-
-### 第三步：理解配置和数据契约
-
-然后看这两个文件：
-
-- [config.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/config.py)
-- [contracts.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/contracts.py)
-
-这一步的目的不是看实现技巧，而是先搞清楚：
-
-- 系统允许配置什么
-- 数据对象在系统内部长什么样
-- 哪些字段是核心字段
-
-如果这一步没看明白，后面读策略逻辑会一直在猜字段含义。
-
-### 第四步：看数据如何进入系统
-
-再读：
-
-- [providers.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/data_ingestion/providers.py)
-- [sample_data.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/data_processing/sample_data.py)
-
-建议先看 `sample_data.py`，因为它最容易帮助你理解系统当前期待的数据形状。
-
-然后再看 `providers.py`，理解：
-
-- `sample` 和 `tushare` 是怎么切换的
-- 原始层缓存如何落盘
-- A/C 份额如何映射到基金实体
-
-### 第五步：按研究链路顺着往下看
-
-理解完入口和数据，再按下面顺序读核心研究模块：
-
-1. [filters.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/universe/filters.py)
-2. [feature_builder.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/features/feature_builder.py)
-3. [scoring_engine.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/ranking/scoring_engine.py)
-4. [construction.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/portfolio/construction.py)
-5. [engine.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/backtest/engine.py)
-
-这样读的好处是你能自然看到一条完整链路：
-
-- 哪些基金先进入基金池
-- 基金池上的基金怎么算特征
-- 特征如何变成分数
-- 分数如何变成组合
-- 组合如何变成回测结果
-
-### 第六步：最后再看报告和测试
-
-最后看：
-
-- [reports.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/reporting/reports.py)
-- [test_pipeline.py](/Users/liupeng/.codex/projects/fund_research_v2/tests/test_pipeline.py)
-
-`reports.py` 适合理解系统最后向使用者输出了什么。  
-`test_pipeline.py` 适合理解当前项目作者认为哪些行为是必须稳定的。
-
-### 推荐的理解顺序总结
-
-最推荐的首次阅读顺序是：
-
-1. `README.md`
-2. `AGENTS.md`
-3. `docs/architecture.md`
-4. `src/fund_research_v2/cli.py`
-5. `src/fund_research_v2/common/workflows.py`
-6. `src/fund_research_v2/common/config.py`
-7. `src/fund_research_v2/common/contracts.py`
-8. `src/fund_research_v2/data_ingestion/providers.py`
-9. `src/fund_research_v2/universe/filters.py`
-10. `src/fund_research_v2/features/feature_builder.py`
-11. `src/fund_research_v2/ranking/scoring_engine.py`
-12. `src/fund_research_v2/portfolio/construction.py`
-13. `src/fund_research_v2/backtest/engine.py`
-14. `tests/test_pipeline.py`
-
-如果你按这个顺序读，通常不会在模块关系上迷路。

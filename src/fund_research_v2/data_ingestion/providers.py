@@ -52,8 +52,9 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
     share_path = raw_dir / "fund_share_class_map.csv"
     nav_path = raw_dir / "fund_nav_monthly.csv"
     benchmark_path = raw_dir / "benchmark_monthly.csv"
+    manager_path = raw_dir / "manager_assignment_monthly.csv"
     snapshot_path = raw_dir / "dataset_snapshot.json"
-    if not all(path.exists() for path in [entity_path, share_path, nav_path, benchmark_path, snapshot_path]):
+    if not all(path.exists() for path in [entity_path, share_path, nav_path, benchmark_path, manager_path, snapshot_path]):
         return None
     metadata = read_json(snapshot_path)
     if not _cached_snapshot_matches_config(config, metadata):
@@ -64,6 +65,7 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
         fund_share_class_map=read_csv(share_path),
         fund_nav_monthly=read_csv(nav_path),
         benchmark_monthly=read_csv(benchmark_path),
+        manager_assignment_monthly=read_csv(manager_path),
         metadata=metadata,
     )
 
@@ -76,6 +78,7 @@ def persist_dataset(config: AppConfig, project_root: Path, dataset: DatasetSnaps
     write_csv(raw_dir / "fund_share_class_map.csv", dataset.fund_share_class_map)
     write_csv(raw_dir / "fund_nav_monthly.csv", dataset.fund_nav_monthly)
     write_csv(raw_dir / "benchmark_monthly.csv", dataset.benchmark_monthly)
+    write_csv(raw_dir / "manager_assignment_monthly.csv", dataset.manager_assignment_monthly)
     write_json(raw_dir / "dataset_snapshot.json", dataset.metadata)
 
 
@@ -140,6 +143,7 @@ class TushareDataProvider:
         share_class_map: list[dict[str, object]] = []
         nav_rows: list[dict[str, object]] = []
         benchmark_rows: list[dict[str, object]] = []
+        manager_rows: list[dict[str, object]] = []
         grouped_rows = _group_share_classes(fund_basic.to_dict("records"))
         for entity_id, rows in grouped_rows.items():
             representative_row = _select_representative_share_class(rows)
@@ -151,6 +155,7 @@ class TushareDataProvider:
             if not entity_nav_rows:
                 # 没有可用月频净值的基金不能进入研究层，否则后续收益窗口和回测口径都无法成立。
                 continue
+            manager_rows.extend(self._build_manager_assignment_rows(str(representative_row["ts_code"]), entity_id, entity_nav_rows))
             normalized_name = _normalize_entity_name(str(representative_row.get("name") or representative_row["ts_code"]))
             fund_entity_master.append(
                 {
@@ -192,6 +197,7 @@ class TushareDataProvider:
             fund_share_class_map=share_class_map,
             fund_nav_monthly=nav_rows,
             benchmark_monthly=benchmark_rows,
+            manager_assignment_monthly=manager_rows,
             metadata={
                 "source_name": "tushare",
                 "generated_at": current_timestamp(),
@@ -216,10 +222,7 @@ class TushareDataProvider:
 
     def _fetch_current_manager(self, ts_code: str) -> tuple[str, str]:
         """获取基金当前在任经理及其任职开始日期。"""
-        try:
-            manager_df = self.client.fund_manager(ts_code=ts_code)
-        except Exception:
-            return "unknown", "20000101"
+        manager_df = self._fetch_manager_df(ts_code)
         if manager_df is None or manager_df.empty:
             return "unknown", "20000101"
         manager_df = manager_df.copy()
@@ -234,6 +237,56 @@ class TushareDataProvider:
         current_df = current_df.sort_values("begin_date")
         row = current_df.iloc[-1].to_dict()
         return str(row.get("name") or "unknown"), str(row.get("begin_date") or "20000101")
+
+    def _fetch_manager_df(self, ts_code: str) -> Any:
+        """抓取基金经理历史明细，失败时返回 None。"""
+        try:
+            return self.client.fund_manager(ts_code=ts_code)
+        except Exception:
+            return None
+
+    def _build_manager_assignment_rows(
+        self,
+        ts_code: str,
+        entity_id: str,
+        entity_nav_rows: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        """把经理任职历史映射到实体的月频时间轴。"""
+        manager_df = self._fetch_manager_df(ts_code)
+        if manager_df is None or manager_df.empty:
+            return []
+        manager_df = manager_df.copy()
+        manager_df["begin_date"] = manager_df["begin_date"].fillna("").astype(str)
+        if "end_date" not in manager_df.columns:
+            manager_df["end_date"] = ""
+        manager_df["end_date"] = manager_df["end_date"].fillna("").astype(str)
+        records = sorted(manager_df.to_dict("records"), key=lambda item: str(item.get("begin_date") or ""))
+        assignment_rows: list[dict[str, object]] = []
+        for nav_row in entity_nav_rows:
+            month = str(nav_row["month"])
+            active_records = [
+                row for row in records
+                if _manager_record_matches_month(row, month)
+            ]
+            if not active_records:
+                active_records = [
+                    row for row in records
+                    if _normalize_month(row.get("begin_date")) <= month
+                ]
+            if not active_records:
+                continue
+            # 若同月存在多名在任经理，先用最近开始任职的经理承载稳定性口径，避免混入整段历史最早经理。
+            selected = sorted(active_records, key=lambda item: str(item.get("begin_date") or ""))[-1]
+            assignment_rows.append(
+                {
+                    "entity_id": entity_id,
+                    "month": month,
+                    "manager_name": str(selected.get("name") or "unknown"),
+                    "manager_start_month": _normalize_month(selected.get("begin_date") or "20000101"),
+                    "manager_end_month": _normalize_month(selected.get("end_date") or "") if str(selected.get("end_date") or "").strip() else "",
+                }
+            )
+        return assignment_rows
 
     def _fetch_monthly_nav_rows(self, ts_code: str, entity_id: str) -> tuple[float, list[dict[str, object]]]:
         """把单份额净值和份额数据整理为月频净值与规模序列。"""
@@ -322,7 +375,15 @@ class TushareDataProvider:
         if not month_set:
             return []
         if self.config.benchmark.source != "tushare_index" or not self.config.benchmark.ts_code:
-            return [{"month": month, "benchmark_return_1m": 0.0, "benchmark_name": self.config.benchmark.name} for month in month_set]
+            return [
+                {
+                    "month": month,
+                    "benchmark_return_1m": 0.0,
+                    "benchmark_name": self.config.benchmark.name,
+                    "available_date": _normalize_date(f"{month[:4]}{month[5:7]}28"),
+                }
+                for month in month_set
+            ]
 
         start_date = f"{month_set[0][:4]}{month_set[0][5:7]}01"
         end_month = month_set[-1]
@@ -359,6 +420,7 @@ class TushareDataProvider:
                         "benchmark_trade_date": "",
                         "benchmark_name": self.config.benchmark.name,
                         "benchmark_ts_code": self.config.benchmark.ts_code,
+                        "available_date": "",
                     }
                 )
                 continue
@@ -370,6 +432,7 @@ class TushareDataProvider:
                     "benchmark_trade_date": _normalize_date(monthly_trade_date[month]),
                     "benchmark_name": self.config.benchmark.name,
                     "benchmark_ts_code": self.config.benchmark.ts_code,
+                    "available_date": _normalize_date(monthly_trade_date[month]),
                 }
             )
             previous_close = close
@@ -517,3 +580,15 @@ def _map_primary_type(fund_type: str) -> str:
     if "混合" in fund_type:
         return "偏股混合"
     return "其他"
+
+
+def _manager_record_matches_month(row: dict[str, object], month: str) -> bool:
+    """判断一条经理任职记录在某个月是否处于在任状态。"""
+    begin_month = _normalize_month(row.get("begin_date") or "20000101")
+    end_raw = str(row.get("end_date") or "").strip()
+    if month < begin_month:
+        return False
+    if not end_raw:
+        return True
+    end_month = _normalize_month(end_raw)
+    return month <= end_month

@@ -130,13 +130,15 @@
 
 - 含义：当前月下基金经理任期月数
 - 计算方式：
-  - 优先使用 `manager_start_month`
-  - 若缺失或异常，回退到 `inception_month`
+  - 优先使用 `manager_assignment_monthly` 中该月匹配到的 `manager_start_month`
+  - 若月度经理映射缺失，再回退到 `fund_entity_master.manager_start_month`
+  - 若仍缺失或异常，回退到 `inception_month`
   - 若起始月晚于当前观察月，则做安全截断，不允许出现负任期
 - 金融语义：
-  - 经理任期越长，通常代表管理风格与历史业绩的可解释性更强
+  - 经理任期越长，通常代表“当前负责人的历史业绩”更具可解释性
 - 风险提示：
   - 该字段不衡量经理能力，只衡量任职持续时间
+  - 若上游只返回单经理口径，联席经理和团队共管关系仍未完整刻画
 
 ### 3.9 `asset_stability_12m`
 
