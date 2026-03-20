@@ -45,8 +45,28 @@ class BacktestConfig:
 
 @dataclass(frozen=True)
 class BenchmarkConfig:
-    """描述市场基准的来源与标识。"""
+    """描述市场基准的来源、序列集合与基金类型映射。"""
+    # benchmark 不再是假设“全市场只用一条序列”，而是允许不同基金类型映射到不同的公开指数。
     source: str
+    default_key: str
+    series: dict[str, "BenchmarkSeriesConfig"]
+    primary_type_map: dict[str, str]
+
+    def key_for_primary_type(self, primary_type: str) -> str:
+        """返回某类基金应使用的 benchmark key；未显式映射时回退到默认基准。"""
+        mapped_key = self.primary_type_map.get(primary_type, self.default_key)
+        if mapped_key in self.series:
+            return mapped_key
+        return self.default_key
+
+    def series_for_key(self, key: str) -> "BenchmarkSeriesConfig":
+        """根据 key 返回 benchmark 配置，并在异常 key 时安全回退。"""
+        return self.series.get(key, self.series[self.default_key])
+
+
+@dataclass(frozen=True)
+class BenchmarkSeriesConfig:
+    """描述单条 benchmark 序列的标识信息。"""
     ts_code: str | None
     name: str
 
@@ -67,6 +87,9 @@ class TushareConfig:
     start_date: str
     end_date: str | None
     max_funds: int | None
+    request_retry_count: int
+    request_pause_ms: int
+    progress_every_entities: int
 
 
 @dataclass(frozen=True)
@@ -122,6 +145,8 @@ def load_config(path: Path) -> AppConfig:
     with path.open("r", encoding="utf-8") as handle:
         raw = json.load(handle)
     # 配置在加载时就转成强类型对象，目的是尽早暴露口径错误，而不是等流程跑到中途才失败。
+    raw_benchmark = raw.get("benchmark", {})
+    benchmark = _load_benchmark_config(raw_benchmark)
     config = AppConfig(
         as_of_date=raw["as_of_date"],
         data_source=raw.get("data_source", "sample"),
@@ -144,11 +169,7 @@ def load_config(path: Path) -> AppConfig:
             benchmark_field=raw["backtest"].get("benchmark_field", "benchmark_return_1m"),
             transaction_cost_bps=float(raw["backtest"].get("transaction_cost_bps", 10.0)),
         ),
-        benchmark=BenchmarkConfig(
-            source=raw.get("benchmark", {}).get("source", "sample"),
-            ts_code=raw.get("benchmark", {}).get("ts_code"),
-            name=raw.get("benchmark", {}).get("name", "sample_benchmark"),
-        ),
+        benchmark=benchmark,
         reporting=ReportingConfig(top_ranked_limit=int(raw["reporting"].get("top_ranked_limit", 10))),
         tushare=TushareConfig(
             fund_market=raw["tushare"].get("fund_market", "O"),
@@ -158,6 +179,9 @@ def load_config(path: Path) -> AppConfig:
             start_date=raw["tushare"].get("start_date", "20180101"),
             end_date=raw["tushare"].get("end_date"),
             max_funds=raw["tushare"].get("max_funds"),
+            request_retry_count=int(raw["tushare"].get("request_retry_count", 2)),
+            request_pause_ms=int(raw["tushare"].get("request_pause_ms", 0)),
+            progress_every_entities=int(raw["tushare"].get("progress_every_entities", 10)),
         ),
         paths=PathsConfig(
             raw_dir=Path(raw["paths"]["raw_dir"]),
@@ -178,6 +202,23 @@ def _validate(config: AppConfig) -> None:
         raise ValueError("data_source 必须是 sample 或 tushare。")
     if config.benchmark.source not in {"sample", "tushare_index"}:
         raise ValueError("benchmark.source 必须是 sample 或 tushare_index。")
+    if config.tushare.request_retry_count < 0:
+        raise ValueError("tushare.request_retry_count 不能小于 0。")
+    if config.tushare.request_pause_ms < 0:
+        raise ValueError("tushare.request_pause_ms 不能小于 0。")
+    if config.tushare.progress_every_entities <= 0:
+        raise ValueError("tushare.progress_every_entities 必须大于 0。")
+    if not config.benchmark.series:
+        raise ValueError("benchmark.series 不能为空。")
+    if config.benchmark.default_key not in config.benchmark.series:
+        raise ValueError("benchmark.default_key 必须存在于 benchmark.series 中。")
+    for primary_type, benchmark_key in config.benchmark.primary_type_map.items():
+        if benchmark_key not in config.benchmark.series:
+            raise ValueError(f"benchmark.primary_type_map 中 {primary_type} -> {benchmark_key} 未在 benchmark.series 中定义。")
+    if config.benchmark.source == "tushare_index":
+        missing_codes = [key for key, series in config.benchmark.series.items() if not str(series.ts_code or "").strip()]
+        if missing_codes:
+            raise ValueError(f"benchmark.source=tushare_index 时，以下 benchmark 缺少 ts_code: {', '.join(missing_codes)}")
     # 当前只保留一种简单权重法，是为了先固定研究口径，避免组合层复杂度盖过数据与因子问题。
     if config.portfolio.weighting_method != "equal_weight":
         raise ValueError("当前仅支持 equal_weight 组合方法。")
@@ -221,8 +262,56 @@ def to_serializable_dict(config: AppConfig) -> dict[str, Any]:
         },
         "portfolio": config.portfolio.__dict__,
         "backtest": config.backtest.__dict__,
-        "benchmark": config.benchmark.__dict__,
+        "benchmark": benchmark_to_serializable_dict(config.benchmark),
         "reporting": config.reporting.__dict__,
         "tushare": config.tushare.__dict__,
         "paths": {key: str(value) for key, value in config.paths.__dict__.items()},
+    }
+
+
+def _load_benchmark_config(raw_benchmark: dict[str, Any]) -> BenchmarkConfig:
+    """兼容旧版单 benchmark 配置与新版多 benchmark 映射配置。"""
+    source = raw_benchmark.get("source", "sample")
+    raw_series = raw_benchmark.get("series") or raw_benchmark.get("benchmarks")
+    default_key = str(raw_benchmark.get("default_key") or "default")
+    if isinstance(raw_series, dict) and raw_series:
+        series = {
+            str(key): BenchmarkSeriesConfig(
+                ts_code=value.get("ts_code") if isinstance(value, dict) else None,
+                name=str(value.get("name") or key) if isinstance(value, dict) else str(key),
+            )
+            for key, value in raw_series.items()
+        }
+    else:
+        series = {
+            default_key: BenchmarkSeriesConfig(
+                ts_code=raw_benchmark.get("ts_code"),
+                name=str(raw_benchmark.get("name", "sample_benchmark")),
+            )
+        }
+    primary_type_map = {
+        str(key): str(value)
+        for key, value in (raw_benchmark.get("primary_type_map") or {}).items()
+    }
+    return BenchmarkConfig(
+        source=source,
+        default_key=default_key,
+        series=series,
+        primary_type_map=primary_type_map,
+    )
+
+
+def benchmark_to_serializable_dict(config: BenchmarkConfig) -> dict[str, Any]:
+    """把 benchmark 配置转换成适合落盘和比对的字典。"""
+    return {
+        "source": config.source,
+        "default_key": config.default_key,
+        "series": {
+            key: {
+                "ts_code": series.ts_code,
+                "name": series.name,
+            }
+            for key, series in config.series.items()
+        },
+        "primary_type_map": config.primary_type_map,
     }

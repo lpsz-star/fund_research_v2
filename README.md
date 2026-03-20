@@ -44,6 +44,14 @@
 - 当前只纳入：
   - `主动股票`
   - `偏股混合`
+  - `灵活配置混合`
+
+当前默认 benchmark 口径为：
+
+- `主动股票 -> 中证800 (000906.SH)`
+- `偏股混合 -> 沪深300 (000300.SH)`
+- `灵活配置混合 -> 中证800 (000906.SH)`
+- 若某类基金缺少专属 benchmark 序列，则回退到默认 benchmark
 
 当前默认研究节奏为：
 
@@ -111,9 +119,32 @@
 接入层现在还会额外输出一份标准审计产物：
 
 - `outputs/<data_source>/reports/ingestion_audit_report.md`
+- `outputs/<data_source>/reports/fund_type_audit_report.md`
 - `outputs/<data_source>/clean/dropped_entities.csv`
+- `outputs/<data_source>/clean/fund_type_audit.csv`
 
-它们专门回答“为什么 fund_basic 里看到的份额/实体，没有进入 clean 层”。
+它们专门回答两类问题：
+
+- 为什么 `fund_basic` 里看到的份额/实体，没有进入 clean 层
+- 为什么某只基金被判成 `主动股票`、`偏股混合`、`被动指数` 或 `其他`
+
+当前 `benchmark_monthly.csv` 也已支持多条指数并行缓存：
+
+- 不再假设整个研究流程只对应一条 benchmark 序列
+- 具体基金类型使用哪条指数，由配置中的 `benchmark.primary_type_map` 决定
+
+真实 `tushare` 抓数现在还会额外保留单接口响应缓存：
+
+- `data/raw/tushare/api_cache/`
+
+它的作用是让后续重跑尽量复用已经成功的接口响应，而不是每次都从头联网全量抓。
+
+如果某次真实抓数只失败了少量份额类，现在还支持单独补抓失败项：
+
+- `make fetch-failed-tushare`
+
+它不会重写整份 raw 快照，而是只根据上一次 `dataset_snapshot.json` 中记录的 `fetch_diagnostics.api_error_samples`，
+对失败的 `ts_code` 重新预热 `fund_manager` / `fund_nav` / `fund_share` 这类单接口缓存，降低下一次全量重跑的无效联网开销。
 
 ## 4. 当前目录结构
 
@@ -144,16 +175,18 @@ fund_research_v2/
 1. 获取或生成数据
 2. 构建基金池
 3. 计算月频特征
-4. 做横截面评分
-5. 构建组合
-6. 运行回测
-7. 输出报告与实验记录
+4. 评估单因子有效性
+5. 做横截面评分
+6. 构建组合
+7. 运行回测
+8. 输出报告与实验记录
 
 对应的职责模块分别是：
 
 - 数据接入：[providers.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/data_ingestion/providers.py)
 - 基金池：[filters.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/universe/filters.py)
 - 特征：[feature_builder.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/features/feature_builder.py)
+- 因子评估：[factor_evaluator.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/evaluation/factor_evaluator.py)
 - 排名：[scoring_engine.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/ranking/scoring_engine.py)
 - 组合：[construction.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/portfolio/construction.py)
 - 回测：[engine.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/backtest/engine.py)
@@ -198,6 +231,7 @@ make run-sample
 运行完成后，建议优先查看：
 
 - [outputs/sample/reports/experiment_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/experiment_report.md)
+- [outputs/sample/reports/factor_evaluation_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/factor_evaluation_report.md)
 - [outputs/sample/reports/portfolio_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/portfolio_report.md)
 - [outputs/sample/reports/universe_audit_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
 
@@ -226,11 +260,24 @@ make run-sample
 make run-tushare
 ```
 
+如果上一次 `fetch-tushare` 或 `run-tushare` 主要是因为少量接口失败，可以先执行：
+
+```bash
+make fetch-failed-tushare
+make run-tushare
+```
+
+建议阅读：
+
+- `outputs/tushare/reports/fetch_retry_report.md`
+- `outputs/tushare/result/fetch_retry_summary.json`
+
 ### 6.5 常用验证命令
 
 ```bash
 make help
 make test
+make fetch-failed-tushare
 make run-sample
 make run-tushare
 make portfolio-tushare

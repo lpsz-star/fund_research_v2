@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import subprocess
 from pathlib import Path
 
@@ -7,14 +8,19 @@ from fund_research_v2.backtest.engine import run_backtest
 from fund_research_v2.common.config import AppConfig, load_config, scope_artifact_dir, to_serializable_dict
 from fund_research_v2.common.date_utils import current_timestamp
 from fund_research_v2.common.io_utils import append_jsonl, ensure_directories, write_csv, write_json
-from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, load_dataset
+from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, load_dataset, warm_failed_api_cache
 from fund_research_v2.evaluation.metrics import summarize_backtest
+from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
 from fund_research_v2.features.feature_builder import build_feature_rows
 from fund_research_v2.portfolio.construction import build_portfolio
 from fund_research_v2.ranking.scoring_engine import score_funds
 from fund_research_v2.reporting.reports import (
     render_backtest_report,
     render_experiment_report,
+    render_fetch_diagnostics_report,
+    render_fetch_retry_report,
+    render_factor_evaluation_report,
+    render_fund_type_audit_report,
     render_ingestion_audit_report,
     render_portfolio_report,
     render_universe_audit_report,
@@ -29,6 +35,18 @@ def fetch_command(config_path: Path) -> None:
     ensure_directories(all_artifact_dirs(config, project_root))
     # fetch 只负责形成本地数据快照，不隐式触发后续研究步骤，避免更新数据与跑实验被混在一起。
     fetch_and_cache_dataset(config, project_root)
+
+
+def fetch_failed_command(config_path: Path) -> None:
+    """只重抓上一次失败的 ts_code，预热单接口缓存。"""
+    config = load_config(config_path)
+    project_root = resolve_project_root(config_path)
+    ensure_directories(all_artifact_dirs(config, project_root))
+    refresh_result = warm_failed_api_cache(config, project_root)
+    report_dir = artifact_dir(config, project_root, config.paths.report_dir)
+    result_dir = artifact_dir(config, project_root, config.paths.result_dir)
+    write_json(result_dir / "fetch_retry_summary.json", refresh_result)
+    render_fetch_retry_report(report_dir / "fetch_retry_report.md", refresh_result)
 
 
 def run_universe_command(config_path: Path) -> None:
@@ -134,6 +152,7 @@ def write_clean_outputs(bundle: dict[str, object]) -> None:
     write_csv(clean_dir / "fund_nav_monthly.csv", dataset.fund_nav_monthly)
     write_csv(clean_dir / "benchmark_monthly.csv", dataset.benchmark_monthly)
     write_csv(clean_dir / "manager_assignment_monthly.csv", dataset.manager_assignment_monthly)
+    write_csv(clean_dir / "fund_type_audit.csv", dataset.fund_type_audit)
     write_csv(clean_dir / "fund_universe_monthly.csv", universe.rows)
     write_json(clean_dir / "dataset_snapshot.json", dataset.metadata)
     ingestion_audit = dataset.metadata.get("ingestion_audit", {}) if isinstance(dataset.metadata.get("ingestion_audit"), dict) else {}
@@ -165,9 +184,15 @@ def write_full_outputs(
     result_dir = artifact_dir(config, project_root, config.paths.result_dir)
     write_csv(result_dir / "backtest_monthly.csv", backtest_rows)
     write_json(result_dir / "backtest_summary.json", backtest_summary)
-    experiment_record = build_experiment_record(config, project_root, dataset.metadata, backtest_summary, portfolio_rows)
+    factor_evaluation = evaluate_factors(feature_rows, dataset.fund_nav_monthly)
+    write_json(result_dir / "factor_evaluation.json", factor_evaluation)
+    write_csv(result_dir / "factor_evaluation.csv", factor_evaluation.get("factor_rows", []))
+    type_baseline = build_type_baseline_snapshot(dataset.fund_entity_master, bundle["universe"].rows)
+    write_json(result_dir / "type_baseline_snapshot.json", type_baseline)
+    experiment_record = build_experiment_record(config, project_root, dataset.metadata, backtest_summary, portfolio_rows, type_baseline, factor_evaluation)
     append_jsonl(artifact_dir(config, project_root, config.paths.experiment_dir) / "experiment_registry.jsonl", experiment_record)
     render_backtest_report(artifact_dir(config, project_root, config.paths.report_dir) / "backtest_report.md", backtest_rows, backtest_summary)
+    render_factor_evaluation_report(artifact_dir(config, project_root, config.paths.report_dir) / "factor_evaluation_report.md", factor_evaluation)
     render_experiment_report(
         artifact_dir(config, project_root, config.paths.report_dir) / "experiment_report.md",
         config=config,
@@ -198,7 +223,10 @@ def write_portfolio_outputs(
             "as_of_date": config.as_of_date,
             "latest_month": latest_month,
             "data_source": config.data_source,
-            "benchmark_name": dataset.metadata.get("benchmark_name", config.benchmark.name),
+            "benchmark_name": dataset.metadata.get(
+                "benchmark_name",
+                config.benchmark.series_for_key(config.benchmark.default_key).name,
+            ),
             "eligible_count": len(latest_scores),
             "portfolio_size": len(portfolio_rows),
             "portfolio": portfolio_rows,
@@ -232,6 +260,16 @@ def write_universe_audit_output(bundle: dict[str, object]) -> None:
         config=config,
         dataset_metadata=dataset.metadata,
     )
+    render_fund_type_audit_report(
+        artifact_dir(config, project_root, config.paths.report_dir) / "fund_type_audit_report.md",
+        config=config,
+        dataset_metadata=dataset.metadata,
+        fund_type_rows=dataset.fund_type_audit,
+    )
+    render_fetch_diagnostics_report(
+        artifact_dir(config, project_root, config.paths.report_dir) / "fetch_diagnostics_report.md",
+        dataset_metadata=dataset.metadata,
+    )
 
 
 def build_experiment_record(
@@ -240,6 +278,8 @@ def build_experiment_record(
     dataset_metadata: dict[str, object],
     backtest_summary: dict[str, object],
     portfolio_rows: list[dict[str, object]],
+    type_baseline: dict[str, object],
+    factor_evaluation: dict[str, object],
 ) -> dict[str, object]:
     """构建单次实验的可追踪记录。"""
     # 实验记录用于追踪“同一套代码+配置+数据快照”产生了什么结果。
@@ -250,8 +290,32 @@ def build_experiment_record(
         "dataset_snapshot": dataset_metadata,
         "git_commit": git_commit_hash(project_root),
         "portfolio_size": len(portfolio_rows),
+        "type_baseline": type_baseline,
+        "factor_evaluation_summary": factor_evaluation.get("summary", {}),
         "backtest_summary": backtest_summary,
         "result_dir": str(artifact_dir(config, project_root, config.paths.result_dir)),
+    }
+
+
+def build_type_baseline_snapshot(
+    entity_rows: list[dict[str, object]],
+    universe_rows: list[dict[str, object]],
+) -> dict[str, object]:
+    """构建一份便于跨实验比较的类型分布快照。"""
+    latest_month = max((str(row["month"]) for row in universe_rows), default="n/a")
+    latest_rows = [row for row in universe_rows if str(row["month"]) == latest_month]
+    eligible_rows = [row for row in latest_rows if int(row["is_eligible"]) == 1]
+    entity_type_counter = Counter(str(row.get("primary_type", "")) for row in entity_rows)
+    latest_type_counter = Counter(str(row.get("primary_type", "")) for row in latest_rows)
+    eligible_type_counter = Counter(str(row.get("primary_type", "")) for row in eligible_rows)
+    return {
+        "latest_month": latest_month,
+        "entity_count": len(entity_rows),
+        "latest_row_count": len(latest_rows),
+        "eligible_count": len(eligible_rows),
+        "entity_type_count": dict(sorted(entity_type_counter.items())),
+        "latest_type_count": dict(sorted(latest_type_counter.items())),
+        "eligible_type_count": dict(sorted(eligible_type_counter.items())),
     }
 
 

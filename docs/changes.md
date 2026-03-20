@@ -180,3 +180,78 @@
   - `fund_age_months` 仍保留在基金池输出中，仅作为审计字段。
 - 目的：
   - 减少和 `min_history_months` 的重复约束，让基金池口径更简洁、更容易解释。
+
+### 22. 把 benchmark 从单序列升级为“多序列 + 基金类型映射”
+
+- 变更内容：
+  - `benchmark` 配置改为支持 `default_key`、`series` 与 `primary_type_map`。
+  - `benchmark_monthly.csv` 现在以 `benchmark_key + month` 为主键保存多条指数序列。
+  - `excess_ret_12m` 改为按 `primary_type` 选择对应 benchmark。
+  - 回测中的 `benchmark_return` 改为按组合持仓权重聚合各类型 benchmark。
+  - 报告新增 `Benchmark Mapping` 段落，显式展示当前基准映射关系。
+- 目的：
+  - 解决“主动股票和偏股混合共用同一条 benchmark”过于粗糙的问题。
+  - 为后续继续升级更细 benchmark 体系保留稳定配置与数据契约。
+
+### 23. 新增基金类型标准化规则与类型审计产物
+
+- 变更内容：
+  - 把基金类型判断从 `providers.py` 中抽离为独立规则模块。
+  - 分类输入改为综合使用 `fund_type`、`invest_type`、`fund_name`、`benchmark_text`。
+  - clean 层新增 `fund_type_audit.csv`。
+  - reports 层新增 `fund_type_audit_report.md`。
+- 目的：
+  - 解决原先“只要 fund_type 含股票/混合就直接归类”的规则过粗问题。
+  - 让基金池准入、benchmark 映射和报告解释都能回溯到同一套可审计分类依据。
+
+### 24. 把 `灵活配置混合` 纳入默认基金池
+
+- 变更内容：
+  - `allowed_primary_types` 新增 `灵活配置混合`。
+  - benchmark 映射中新增 `灵活配置混合 -> broad_equity -> 中证800`。
+  - sample 数据中补入该类型样本，保证默认流程能覆盖新口径。
+- 目的：
+  - 让主线研究范围从“主动股票 + 偏股混合”扩展到更常见的主动权益混合基金。
+  - 同时避免 `灵活配置混合` 继续被混在 `其他` 或被手工例外处理。
+
+### 25. 新增类型对比基线快照
+
+- 变更内容：
+  - 在 result 层新增 `type_baseline_snapshot.json`。
+  - 在 `experiment_registry.jsonl` 中同步写入 `type_baseline` 摘要。
+- 目的：
+  - 为后续真实重抓后的类型迁移比较提供机器可读基线。
+  - 避免未来只知道“结果变了”，却说不清是基金类型分布、最新月基金池还是可投样本结构发生了变化。
+
+### 26. 新增单因子有效性评估框架
+
+- 变更内容：
+  - 在 `evaluation/` 下新增 `factor_evaluator.py`。
+  - 完整实验新增 `factor_evaluation.json`、`factor_evaluation.csv` 与 `factor_evaluation_report.md`。
+  - 实验记录中新增 `factor_evaluation_summary`。
+- 目的：
+  - 把“因子是否真的对下一月收益有区分度”变成标准产物，而不是靠人工感觉判断。
+  - 为后续淘汰弱因子、重构评分体系提供证据基线。
+
+### 27. 优化 tushare 抓数性能与可观测性
+
+- 变更内容：
+  - 为 `fund_manager` 与单份额月频净值请求增加内存缓存，消除重复抓取。
+  - 为 Tushare 请求增加统一重试、失败样本记录、接口耗时统计。
+  - 为 `fund_nav` 增加默认节流与限频感知退避。
+  - 新增 `fetch_diagnostics_report.md`，显式输出抓数耗时与错误样本。
+- 目的：
+  - 缓解“抓数很慢但不知道慢在哪里、错在哪里”的问题。
+  - 为后续扩大真实样本时的分批抓取和限频治理提供观测基础。
+
+### 28. 新增失败项增量补抓工作流
+
+- 变更内容：
+  - 新增 CLI 命令 `fetch-failed` 与 `make fetch-failed-tushare`。
+  - 根据上一份 raw `dataset_snapshot.json` 中的 `fetch_diagnostics.api_error_samples` 提取失败 `ts_code`。
+  - 只对失败份额预热单接口缓存，不重写整份 raw 快照。
+  - 新增 `fetch_retry_summary.json` 与 `fetch_retry_report.md`。
+  - 增补 CLI 分发与失败补抓结果落盘测试。
+- 目的：
+  - 避免真实抓数因少量接口失败而被迫整批重来。
+  - 先补齐失败接口缓存，再执行全量研究流程，降低重复联网成本并提升可观测性。

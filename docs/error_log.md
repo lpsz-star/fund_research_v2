@@ -220,3 +220,42 @@
   - 基金池原因码更简洁。
   - 新旧 baseline 不再完全可比。
 - 当前状态：已修复。
+
+## 13. 单一 benchmark 同时用于 `主动股票` 与 `偏股混合`
+
+- 发现时间：2026-03-20
+- 影响模块：
+  - [`feature_builder.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/features/feature_builder.py)
+  - [`engine.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/backtest/engine.py)
+  - benchmark 配置与报告模块
+- 现象：
+  - `excess_ret_12m` 和回测比较基准都默认使用同一条中证800。
+  - `主动股票` 与 `偏股混合` 的市场暴露差异没有被 benchmark 口径反映。
+- 根因：
+  - 早期实现把 benchmark 视作“全策略唯一序列”，数据契约只有 `month -> return` 这一维。
+- 修复方案：
+  - benchmark 配置升级为 `default_key + series + primary_type_map`。
+  - `benchmark_monthly` 升级为多序列结构。
+  - 特征层按基金类型映射 benchmark，回测按组合权重聚合 benchmark。
+- 影响范围：
+  - 新旧版本的 `excess_ret_12m`、`performance_quality` 与回测超额收益不再完全可比。
+  - 旧缓存若仍保留单 benchmark 结构，会被新的 benchmark 配置签名校验拒绝复用。
+- 当前状态：已修复，并补充测试。
+
+## 14. 基金类型判断过于依赖 `fund_type` 单字段
+
+- 发现时间：2026-03-20
+- 影响模块：
+  - [`providers.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/data_ingestion/providers.py)
+  - benchmark 映射、基金池与审计解释
+- 现象：
+  - 旧实现只要 `fund_type` 含“股票”就归为 `主动股票`，含“混合”就归为 `偏股混合`。
+  - 被动指数、指数增强、灵活配置混合等产品容易被粗暴归类。
+- 根因：
+  - 类型标准化逻辑过早简化，没有综合使用 `invest_type`、基金名称和业绩比较基准文本。
+- 修复方案：
+  - 抽出独立基金类型分类模块。
+  - 新增 `fund_type_audit.csv` 与 `fund_type_audit_report.md`，把规则命中、置信度和中文解释显式落盘。
+- 影响范围：
+  - 新旧版本在 `primary_type`、基金池原因码、benchmark 映射与超额收益解释上不再完全可比。
+- 当前状态：已修复，并补充测试。

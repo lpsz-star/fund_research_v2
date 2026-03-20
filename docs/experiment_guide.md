@@ -28,6 +28,15 @@ make run-sample
 make run-tushare
 ```
 
+当真实抓数上一次只失败了少量份额接口时，允许先走失败增量补抓：
+
+```bash
+make fetch-failed-tushare
+make run-tushare
+```
+
+这一步的目的不是直接生成完整 clean/result 产物，而是先把上次失败的单接口缓存补齐，避免下一次全量实验再次从零联网重抓。
+
 对应 CLI：
 
 ```bash
@@ -43,6 +52,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tusha
 - `sample` 默认查看 `outputs/sample/...`
 - `tushare` 默认查看 `outputs/tushare/...`
 - 若要解释 clean 层之前为什么丢掉基金，请优先查看 `ingestion_audit_report.md`
+- 若要排查真实抓数慢点或接口报错，请优先查看 `fetch_diagnostics_report.md`
 
 ### 3.1 清洗层
 
@@ -62,6 +72,9 @@ PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tusha
 - [`portfolio_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_snapshot.json)
 - [`backtest_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_monthly.csv)
 - [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_summary.json)
+- [`factor_evaluation.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/factor_evaluation.json)
+- [`factor_evaluation.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/factor_evaluation.csv)
+- [`type_baseline_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_snapshot.json)
 
 ### 3.3 报告层
 
@@ -69,6 +82,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tusha
 - [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
 - [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/backtest_report.md)
 - [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
+- [`factor_evaluation_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/factor_evaluation_report.md)
 
 ### 3.4 实验追踪层
 
@@ -83,6 +97,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tusha
 3. benchmark 一致
 4. 代码逻辑一致
 5. 成本口径一致
+6. 基金类型基线一致
 
 至少要核对：
 
@@ -91,6 +106,7 @@ PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tusha
 - `benchmark_name`
 - `benchmark_source`
 - `benchmark_ts_code`
+- `type_baseline`
 - `entity_asset_aggregation`
 - `backtest.transaction_cost_bps`
 
@@ -120,10 +136,22 @@ make run-sample
 make run-tushare
 ```
 
+如果上一次抓数日志显示失败集中在少量 `ts_code`，建议先执行：
+
+```bash
+make fetch-failed-tushare
+```
+
+增量补抓后重点查看：
+
+- [`fetch_retry_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/fetch_retry_report.md)
+- [`fetch_retry_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/fetch_retry_summary.json)
+
 建议优先检查：
 
 - [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/clean/dataset_snapshot.json)
 - [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/universe_audit_report.md)
+- [`fetch_diagnostics_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/fetch_diagnostics_report.md)
 - [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/portfolio_report.md)
 - [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/backtest_summary.json)
 
@@ -137,11 +165,13 @@ make run-tushare
    - 先确认哪些字段能解释历史月份，哪些只是最新快照
 3. [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
    - 确认基金池是如何收缩的
-4. [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/portfolio_report.md)
+4. [`type_baseline_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_snapshot.json)
+   - 看基金主体、最新月基金池和最新月可投基金在各 `primary_type` 上的分布
+5. [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/portfolio_report.md)
    - 看当前组合建议和未入选高分基金
-5. [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/experiment_report.md)
+6. [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/experiment_report.md)
    - 看本次实验上下文与结果总览
-6. [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/backtest_report.md)
+7. [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/backtest_report.md)
    - 再看历史表现
 
 ## 6.1 读报告时必须注意的时点边界
@@ -187,7 +217,9 @@ make run-tushare
 - 使用配置文件
 - benchmark
 - 数据快照时间
+- 类型基线快照
 - 是否命中缓存
+- 是否执行过 `fetch-failed-tushare`
 - 是否存在已知近似口径
 - 回测摘要
 

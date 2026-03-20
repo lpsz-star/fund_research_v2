@@ -6,6 +6,7 @@ from pathlib import Path
 from fund_research_v2.common.config import load_config
 from fund_research_v2.common.workflows import (
     fetch_command,
+    fetch_failed_command,
     run_backtest_command,
     run_experiment_command,
     run_feature_command,
@@ -22,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     for command_name in [
         "fetch",
+        "fetch-failed",
         "build-universe",
         "compute-features",
         "run-ranking",
@@ -42,6 +44,7 @@ def main() -> int:
     load_config(config_path)
     command_map = {
         "fetch": fetch_command,
+        "fetch-failed": fetch_failed_command,
         "build-universe": run_universe_command,
         "compute-features": run_feature_command,
         "run-ranking": run_ranking_command,

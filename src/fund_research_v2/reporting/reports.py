@@ -21,6 +21,37 @@ def _time_boundary_notes() -> list[str]:
     ]
 
 
+def _benchmark_summary_lines(config: AppConfig, dataset_metadata: dict[str, object]) -> list[str]:
+    """返回 benchmark 配置摘要，便于报告解释当前比较基准口径。"""
+    benchmark_series = dataset_metadata.get("benchmark_series")
+    if not isinstance(benchmark_series, dict) or not benchmark_series:
+        benchmark_series = {
+            key: {
+                "name": series.name,
+                "ts_code": series.ts_code or "",
+            }
+            for key, series in config.benchmark.series.items()
+        }
+    primary_type_map = dataset_metadata.get("benchmark_primary_type_map")
+    if not isinstance(primary_type_map, dict):
+        primary_type_map = config.benchmark.primary_type_map
+    default_key = str(dataset_metadata.get("benchmark_default_key") or config.benchmark.default_key)
+    lines = [f"- benchmark_default_key: {default_key}", "- benchmark_series:"]
+    for benchmark_key in sorted(benchmark_series):
+        payload = benchmark_series[benchmark_key]
+        if isinstance(payload, dict):
+            name = payload.get("name", benchmark_key)
+            ts_code = payload.get("ts_code", "") or "n/a"
+        else:
+            name = benchmark_key
+            ts_code = "n/a"
+        lines.append(f"-   {benchmark_key}: name={name}, ts_code={ts_code}")
+    lines.append("- benchmark_primary_type_map:")
+    for primary_type in sorted(primary_type_map):
+        lines.append(f"-   {primary_type}: {primary_type_map[primary_type]}")
+    return lines
+
+
 def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], summary: dict[str, object]) -> None:
     """把回测结果写成简洁的 Markdown 报告。"""
     # 报告优先写成 Markdown，是为了让实验输出天然可版本化、可 diff，而不是锁死在 notebook 或富文本里。
@@ -31,7 +62,32 @@ def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], s
     for row in backtest_rows[:24]:
         lines.append(
             f"- {row['execution_month']}: net={row['portfolio_return_net']}, "
-            f"benchmark={row['benchmark_return']}, turnover={row['turnover']}"
+            f"benchmark={row['benchmark_return']}, benchmark_mix={row.get('benchmark_mix', '')}, turnover={row['turnover']}"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def render_factor_evaluation_report(path: Path, evaluation: dict[str, object]) -> None:
+    """把因子有效性评估结果写成 Markdown 报告。"""
+    summary = evaluation.get("summary", {}) if isinstance(evaluation.get("summary"), dict) else {}
+    factor_rows = evaluation.get("factor_rows", []) if isinstance(evaluation.get("factor_rows"), list) else []
+    lines = [
+        "# Factor Evaluation Report",
+        "",
+        "## Summary",
+        "",
+    ]
+    for key, value in summary.items():
+        lines.append(f"- {key}: {value}")
+    lines.extend(["", "## Factor Diagnostics", ""])
+    for row in factor_rows:
+        lines.append(
+            f"- {row['factor_name']}: direction={row['direction']} "
+            f"months={row['evaluation_months']} avg_rankic={row['avg_rankic']} "
+            f"rankic_ir={row['rankic_ir']} "
+            f"top_bottom_next_return={row['avg_top_bottom_next_return']} "
+            f"direction_ok={row['direction_ok']}"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -79,6 +135,136 @@ def render_ingestion_audit_report(path: Path, config: AppConfig, dataset_metadat
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def render_fund_type_audit_report(
+    path: Path,
+    config: AppConfig,
+    dataset_metadata: dict[str, object],
+    fund_type_rows: list[dict[str, object]],
+) -> None:
+    """把基金类型标准化结果写成审计报告。"""
+    summary = dataset_metadata.get("fund_type_audit_summary", {}) if isinstance(dataset_metadata.get("fund_type_audit_summary"), dict) else {}
+    by_primary_type = summary.get("by_primary_type", {}) if isinstance(summary.get("by_primary_type"), dict) else {}
+    by_confidence = summary.get("by_confidence", {}) if isinstance(summary.get("by_confidence"), dict) else {}
+    low_confidence_rows = [row for row in fund_type_rows if str(row.get("confidence", "")) == "low"]
+    lines = [
+        "# Fund Type Audit Report",
+        "",
+        "## Audit Context",
+        "",
+        f"- as_of_date: {config.as_of_date}",
+        f"- data_source: {config.data_source}",
+        f"- audited_entity_count: {summary.get('entity_count', len(fund_type_rows))}",
+        "",
+        "## By Primary Type",
+        "",
+    ]
+    for primary_type in sorted(by_primary_type):
+        lines.append(f"- {primary_type}: {by_primary_type[primary_type]}")
+    lines.extend(["", "## By Confidence", ""])
+    for confidence in sorted(by_confidence):
+        lines.append(f"- {confidence}: {by_confidence[confidence]}")
+    lines.extend(["", "## Low Confidence Or Fallback Cases", ""])
+    for row in low_confidence_rows[:50]:
+        lines.append(
+            f"- {row.get('entity_name', row.get('entity_id', 'unknown'))}: "
+            f"primary_type={row.get('primary_type', '')} "
+            f"raw_fund_type={row.get('raw_fund_type', '')} "
+            f"raw_invest_type={row.get('raw_invest_type', '')} "
+            f"rule={row.get('rule_code', '')} "
+            f"reason={row.get('reason', '')}"
+        )
+    lines.extend(["", "## Sample Rows", ""])
+    for row in fund_type_rows[:50]:
+        lines.append(
+            f"- {row.get('entity_name', row.get('entity_id', 'unknown'))}: "
+            f"primary_type={row.get('primary_type', '')} "
+            f"confidence={row.get('confidence', '')} "
+            f"rule={row.get('rule_code', '')} "
+            f"raw_fund_type={row.get('raw_fund_type', '')}"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def render_fetch_diagnostics_report(path: Path, dataset_metadata: dict[str, object]) -> None:
+    """把抓数过程中的接口耗时、失败和错误样本写成诊断报告。"""
+    diagnostics = dataset_metadata.get("fetch_diagnostics", {}) if isinstance(dataset_metadata.get("fetch_diagnostics"), dict) else {}
+    api_call_stats = diagnostics.get("api_call_stats", {}) if isinstance(diagnostics.get("api_call_stats"), dict) else {}
+    api_cache_stats = diagnostics.get("api_cache_stats", {}) if isinstance(diagnostics.get("api_cache_stats"), dict) else {}
+    api_error_samples = diagnostics.get("api_error_samples", []) if isinstance(diagnostics.get("api_error_samples"), list) else []
+    lines = [
+        "# Fetch Diagnostics Report",
+        "",
+        "## Summary",
+        "",
+        f"- runtime_seconds: {diagnostics.get('runtime_seconds', 'n/a')}",
+        f"- api_count: {len(api_call_stats)}",
+        f"- error_sample_count: {len(api_error_samples)}",
+        "",
+        "## API Call Stats",
+        "",
+    ]
+    for api_name, payload in api_call_stats.items():
+        if isinstance(payload, dict):
+            lines.append(
+                f"- {api_name}: calls={payload.get('calls', 'n/a')} "
+                f"failures={payload.get('failures', 'n/a')} "
+                f"elapsed_seconds={payload.get('elapsed_seconds', 'n/a')}"
+            )
+    lines.extend(["", "## API Cache Stats", ""])
+    for api_name, payload in api_cache_stats.items():
+        if isinstance(payload, dict):
+            lines.append(
+                f"- {api_name}: hits={payload.get('hits', 'n/a')} "
+                f"misses={payload.get('misses', 'n/a')}"
+            )
+    lines.extend(["", "## Error Samples", ""])
+    for row in api_error_samples[:50]:
+        lines.append(
+            f"- api={row.get('api_name', '')} ts_code={row.get('ts_code', '') or 'n/a'} "
+            f"attempt={row.get('attempt', '')} error={row.get('error', '')}"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def render_fetch_retry_report(path: Path, refresh_result: dict[str, object]) -> None:
+    """把失败项增量补抓的结果写成报告。"""
+    diagnostics = refresh_result.get("fetch_diagnostics", {}) if isinstance(refresh_result.get("fetch_diagnostics"), dict) else {}
+    api_call_stats = diagnostics.get("api_call_stats", {}) if isinstance(diagnostics.get("api_call_stats"), dict) else {}
+    api_cache_stats = diagnostics.get("api_cache_stats", {}) if isinstance(diagnostics.get("api_cache_stats"), dict) else {}
+    error_samples = diagnostics.get("api_error_samples", []) if isinstance(diagnostics.get("api_error_samples"), list) else []
+    lines = [
+        "# Fetch Retry Report",
+        "",
+        "## Summary",
+        "",
+        f"- generated_at: {refresh_result.get('generated_at', 'n/a')}",
+        f"- runtime_seconds: {refresh_result.get('runtime_seconds', 'n/a')}",
+        f"- failed_ts_code_count: {refresh_result.get('failed_ts_code_count', 'n/a')}",
+        f"- success_ts_code_count: {refresh_result.get('success_ts_code_count', 'n/a')}",
+        f"- failed_ts_code_count_after_retry: {refresh_result.get('failed_ts_code_count_after_retry', 'n/a')}",
+        "",
+        "## API Call Stats",
+        "",
+    ]
+    for api_name, payload in api_call_stats.items():
+        if isinstance(payload, dict):
+            lines.append(f"- {api_name}: calls={payload.get('calls', 'n/a')} failures={payload.get('failures', 'n/a')} elapsed_seconds={payload.get('elapsed_seconds', 'n/a')}")
+    lines.extend(["", "## API Cache Stats", ""])
+    for api_name, payload in api_cache_stats.items():
+        if isinstance(payload, dict):
+            lines.append(f"- {api_name}: hits={payload.get('hits', 'n/a')} misses={payload.get('misses', 'n/a')}")
+    lines.extend(["", "## Failed TS Codes After Retry", ""])
+    for ts_code in refresh_result.get("failed_ts_codes_after_retry", []) if isinstance(refresh_result.get("failed_ts_codes_after_retry"), list) else []:
+        lines.append(f"- {ts_code}")
+    lines.extend(["", "## Error Samples", ""])
+    for row in error_samples[:50]:
+        lines.append(f"- api={row.get('api_name', '')} ts_code={row.get('ts_code', '') or 'n/a'} attempt={row.get('attempt', '')} error={row.get('error', '')}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def render_experiment_report(
     path: Path,
     config: AppConfig,
@@ -101,9 +287,9 @@ def render_experiment_report(
         f"- data_source: {config.data_source}",
         f"- latest_month: {latest_month}",
         f"- dataset_source: {dataset_metadata.get('source_name', 'unknown')}",
-        f"- benchmark_name: {dataset_metadata.get('benchmark_name', config.benchmark.name)}",
+        f"- benchmark_name: {dataset_metadata.get('benchmark_name', config.benchmark.series_for_key(config.benchmark.default_key).name)}",
         f"- benchmark_source: {dataset_metadata.get('benchmark_source', config.benchmark.source)}",
-        f"- benchmark_ts_code: {dataset_metadata.get('benchmark_ts_code', config.benchmark.ts_code or 'n/a')}",
+        f"- benchmark_ts_code: {dataset_metadata.get('benchmark_ts_code', config.benchmark.series_for_key(config.benchmark.default_key).ts_code or 'n/a')}",
         f"- entity_count: {dataset_metadata.get('entity_count', 'n/a')}",
         f"- share_class_count: {dataset_metadata.get('share_class_count', 'n/a')}",
         f"- month_range_start: {month_range.get('start', 'n/a')}",
@@ -112,9 +298,15 @@ def render_experiment_report(
         f"- portfolio_size: {config.portfolio.portfolio_size}",
         f"- transaction_cost_bps: {config.backtest.transaction_cost_bps}",
         "",
-        "## Latest Ranking Snapshot",
+        "## Benchmark Mapping",
         "",
     ]
+    lines.extend(_benchmark_summary_lines(config, dataset_metadata))
+    lines.extend([
+        "",
+        "## Latest Ranking Snapshot",
+        "",
+    ])
     for row in latest_rows:
         lines.append(
             f"- rank {row['rank']}: {row['entity_name']} "
@@ -158,7 +350,7 @@ def render_portfolio_report(
         f"- latest_month: {latest_month}",
         f"- data_source: {config.data_source}",
         f"- dataset_source: {dataset_metadata.get('source_name', 'unknown')}",
-        f"- benchmark_name: {dataset_metadata.get('benchmark_name', config.benchmark.name)}",
+        f"- benchmark_name: {dataset_metadata.get('benchmark_name', config.benchmark.series_for_key(config.benchmark.default_key).name)}",
         f"- eligible_funds: {len(latest_scores)}",
         f"- portfolio_size: {len(portfolio_rows)}",
         f"- weighting_method: {config.portfolio.weighting_method}",
@@ -166,9 +358,15 @@ def render_portfolio_report(
         f"- single_company_max: {config.portfolio.single_company_max}",
         f"- selected_companies: {', '.join(selected_companies) if selected_companies else 'n/a'}",
         "",
-        "## Top Ranked Candidates",
+        "## Benchmark Mapping",
         "",
     ]
+    lines.extend(_benchmark_summary_lines(config, dataset_metadata))
+    lines.extend([
+        "",
+        "## Top Ranked Candidates",
+        "",
+    ])
     for row in top_ranked_rows:
         lines.append(
             f"- rank {row['rank']}: {row['entity_name']} "
@@ -200,13 +398,25 @@ def render_universe_audit_report(
     latest_month = max((str(row["month"]) for row in universe_rows), default="n/a")
     latest_universe_rows = [row for row in universe_rows if str(row["month"]) == latest_month]
     entity_lookup = {str(row["entity_id"]): row for row in entity_rows}
+    current_ids = [str(row["entity_id"]) for row in entity_rows]
     eligible_rows = [row for row in latest_universe_rows if int(row["is_eligible"]) == 1]
     reason_counter: Counter[str] = Counter()
     for row in latest_universe_rows:
         for reason in [item for item in str(row["reason_codes"]).split("|") if item]:
             reason_counter[reason] += 1
+    type_counter: Counter[str] = Counter(str(entity.get("primary_type", "")) for entity in entity_rows)
+    allowed_type_counter: Counter[str] = Counter(
+        str(entity_lookup[entity_id].get("primary_type", ""))
+        for entity_id in current_ids
+        if str(entity_lookup[entity_id].get("primary_type", "")) in config.universe.allowed_primary_types
+    )
+    excluded_type_counter: Counter[str] = Counter(
+        str(entity_lookup[entity_id].get("primary_type", ""))
+        for entity_id in current_ids
+        if str(entity_lookup[entity_id].get("primary_type", "")) not in config.universe.allowed_primary_types
+    )
+    eligible_type_counter: Counter[str] = Counter(str(entity_lookup[str(row["entity_id"])].get("primary_type", "")) for row in eligible_rows)
 
-    current_ids = [str(row["entity_id"]) for row in entity_rows]
     funnel_rows = [
         ("初始基金主体", current_ids),
         (
@@ -275,6 +485,16 @@ def render_universe_audit_report(
         drop_text = "n/a" if previous_count is None else str(previous_count - count)
         lines.append(f"- {step_name}: count={count} dropped={drop_text}")
         previous_count = count
+
+    lines.extend(["", "## Type Funnel", ""])
+    for primary_type, count in sorted(type_counter.items(), key=lambda item: (-item[1], item[0])):
+        lines.append(f"- 初始主体: type={primary_type} count={count}")
+    for primary_type, count in sorted(allowed_type_counter.items(), key=lambda item: (-item[1], item[0])):
+        lines.append(f"- 保留类型后: type={primary_type} count={count}")
+    for primary_type, count in sorted(excluded_type_counter.items(), key=lambda item: (-item[1], item[0])):
+        lines.append(f"- 被整体排除类型: type={primary_type} count={count}")
+    for primary_type, count in sorted(eligible_type_counter.items(), key=lambda item: (-item[1], item[0])):
+        lines.append(f"- 最新月可投: type={primary_type} count={count}")
 
     lines.extend(["", "## Reason Counts", ""])
     for reason, count in sorted(reason_counter.items(), key=lambda item: (-item[1], item[0])):

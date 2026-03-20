@@ -36,7 +36,10 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
             assets = [float(row["assets_cny_mn"]) for row in visible_rows]
             months = [str(row["month"]) for row in visible_rows]
             index = len(months) - 1
-            benchmark_lookup = _visible_benchmark_lookup(benchmark_rows, month)
+            benchmark_key = config.benchmark.key_for_primary_type(str(entity["primary_type"]))
+            benchmark_lookup_map = _visible_benchmark_lookup_map(benchmark_rows, month, config.benchmark.default_key)
+            benchmark_lookup = _benchmark_lookup_for_key(benchmark_lookup_map, benchmark_key, config.benchmark.default_key)
+            benchmark_series = config.benchmark.series_for_key(benchmark_key)
             # 特征只用当月及历史窗口数据构造，避免把未来月份收益泄漏到当前信号。
             feature_rows.append(
                 {
@@ -46,6 +49,8 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
                     "entity_name": entity["entity_name"],
                     "fund_company": entity["fund_company"],
                     "primary_type": entity["primary_type"],
+                    "benchmark_key": benchmark_key,
+                    "benchmark_name": benchmark_series.name,
                     "manager_name": _manager_name_for_month(entity, manager_lookup.get((entity_id, month))),
                     "ret_3m": _window_total_return(returns, index, 3),
                     "ret_6m": _window_total_return(returns, index, 6),
@@ -125,15 +130,31 @@ def _window_total_return_from_scalar(benchmark_lookup: dict[str, float], months:
     return round(result - 1.0, 6)
 
 
-def _visible_benchmark_lookup(benchmark_rows: list[dict[str, object]], signal_month: str) -> dict[str, float]:
+def _visible_benchmark_lookup_map(
+    benchmark_rows: list[dict[str, object]],
+    signal_month: str,
+    default_benchmark_key: str,
+) -> dict[str, dict[str, float]]:
     """构建截至某个信号月末实际可见的 benchmark 月收益映射。"""
-    visible_lookup: dict[str, float] = {}
+    visible_lookup: dict[str, dict[str, float]] = defaultdict(dict)
     for row in benchmark_rows:
         month = str(row["month"])
         available_date = _benchmark_available_date(row)
         if month <= signal_month and is_available_by_month_end(available_date, signal_month):
-            visible_lookup[month] = float(row["benchmark_return_1m"])
+            benchmark_key = str(row.get("benchmark_key") or default_benchmark_key)
+            visible_lookup[benchmark_key][month] = float(row["benchmark_return_1m"])
     return visible_lookup
+
+
+def _benchmark_lookup_for_key(
+    lookup_map: dict[str, dict[str, float]],
+    benchmark_key: str,
+    default_benchmark_key: str,
+) -> dict[str, float]:
+    """返回某条 benchmark 的可见收益映射，缺失时回退到默认 benchmark。"""
+    if benchmark_key in lookup_map and lookup_map[benchmark_key]:
+        return lookup_map[benchmark_key]
+    return lookup_map.get(default_benchmark_key, {})
 
 
 def _benchmark_available_date(row: dict[str, object]) -> str:

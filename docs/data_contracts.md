@@ -32,6 +32,7 @@
 - `fund_nav_monthly.csv`
 - `benchmark_monthly.csv`
 - `manager_assignment_monthly.csv`
+- `fund_type_audit.csv`
 - `dropped_entities.csv`
 - `dataset_snapshot.json`
 
@@ -82,7 +83,7 @@
 - `entity_name`
   基金实体名称，默认去除 A/C 后缀。
 - `primary_type`
-  当前基金主类型，例如 `主动股票`、`偏股混合`。
+  当前基金主类型，例如 `主动股票`、`偏股混合`、`灵活配置混合`。
 - `fund_company`
   基金公司。
 - `manager_name`
@@ -151,14 +152,20 @@
 关键字段：
 
 - `month`
+- `benchmark_key`
+- `benchmark_name`
+- `benchmark_ts_code`
 - `benchmark_return_1m`
 
 主键：
 
-- `month`
+- `benchmark_key + month`
 
 说明：
 
+- 当前允许同一研究快照同时保存多条 benchmark 序列。
+- `benchmark_key` 是项目内部使用的稳定标识，例如 `broad_equity`、`large_cap_equity`。
+- 基金类型到 benchmark 的映射由配置中的 `benchmark.primary_type_map` 决定。
 - 若存在 `available_date`，则特征层构造 `excess_ret_12m` 时只能使用信号月月末前已可见的 benchmark 月收益。
 
 ### 3.5 `manager_assignment_monthly`
@@ -212,7 +219,36 @@
 - 审计报告解释历史月份时，应优先使用该字段，而不是 `fund_entity_master.latest_assets_cny_mn`
 - `fund_age_months` 当前保留为审计字段，不再作为默认基金池独立筛选条件
 
-### 3.7 `fund_feature_monthly`
+### 3.7 `fund_type_audit`
+
+基金类型标准化审计表。
+
+关键字段：
+
+- `entity_id`
+- `entity_name`
+- `share_class_id`
+- `fund_name`
+- `raw_fund_type`
+- `raw_invest_type`
+- `benchmark_text`
+- `primary_type`
+- `rule_code`
+- `confidence`
+- `reason`
+
+主键：
+
+- `entity_id`
+
+说明：
+
+- 这张表不负责决定基金池去留，而是回答“这只基金为什么被分到这个类型”。
+- `primary_type` 是当前研究流程消费的标准类型。
+- `rule_code` 和 `reason` 用于解释具体命中的规则。
+- `confidence` 用于标记低置信度或 fallback 分类，方便后续人工抽查与规则迭代。
+
+### 3.8 `fund_feature_monthly`
 
 因子输入和中间特征。
 

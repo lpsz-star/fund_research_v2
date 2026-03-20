@@ -1,24 +1,27 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 import math
 import re
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from fund_research_v2.common.config import AppConfig, scope_artifact_dir
+from fund_research_v2.common.config import AppConfig, benchmark_to_serializable_dict, scope_artifact_dir
 from fund_research_v2.common.contracts import DatasetSnapshot
 from fund_research_v2.common.date_utils import current_timestamp
 from fund_research_v2.common.io_utils import read_csv, read_json, write_csv, write_json
+from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
 from fund_research_v2.data_processing.sample_data import generate_sample_dataset
 
 
 def load_dataset(config: AppConfig, project_root: Path) -> DatasetSnapshot:
     """按配置加载研究数据，必要时触发 sample 生成或 tushare 缓存读取。"""
     if config.data_source == "sample":
-        dataset = generate_sample_dataset(config.lookback_months)
+        dataset = generate_sample_dataset(config.lookback_months, config.benchmark)
         persist_dataset(config, project_root, dataset)
         return dataset
     # tushare 模式优先读缓存，是为了把“研究运行”与“联网抓数”解耦，减少每次实验对外部网络的依赖。
@@ -34,15 +37,50 @@ def load_dataset(config: AppConfig, project_root: Path) -> DatasetSnapshot:
 def fetch_and_cache_dataset(config: AppConfig, project_root: Path) -> DatasetSnapshot:
     """主动抓取数据并写入 raw 层缓存。"""
     if config.data_source == "sample":
-        dataset = generate_sample_dataset(config.lookback_months)
+        dataset = generate_sample_dataset(config.lookback_months, config.benchmark)
         persist_dataset(config, project_root, dataset)
         return dataset
     token = _load_tushare_token(project_root / config.local_secret_path)
-    provider = TushareDataProvider(config, token)
+    provider = TushareDataProvider(config, token, project_root)
     dataset = provider.fetch()
     # 真实接口抓到的数据必须先固化到 raw 层，后续流程都从快照出发，避免同一实验前后数据漂移。
     persist_dataset(config, project_root, dataset)
     return dataset
+
+
+def warm_failed_api_cache(config: AppConfig, project_root: Path) -> dict[str, object]:
+    """只针对上一次失败的 ts_code 预热单接口缓存，不重写整份 raw 快照。"""
+    if config.data_source != "tushare":
+        raise RuntimeError("仅 tushare 数据源支持失败项增量补抓。")
+    raw_dir = project_root / scope_artifact_dir(config.paths.raw_dir, config.data_source)
+    snapshot_path = raw_dir / "dataset_snapshot.json"
+    if not snapshot_path.exists():
+        raise RuntimeError("缺少 raw 层 dataset_snapshot.json，无法定位失败项。")
+    metadata = read_json(snapshot_path)
+    if not isinstance(metadata, dict):
+        raise RuntimeError("dataset_snapshot.json 结构无效，无法定位失败项。")
+    diagnostics = metadata.get("fetch_diagnostics", {})
+    if not isinstance(diagnostics, dict):
+        raise RuntimeError("dataset_snapshot.json 中缺少 fetch_diagnostics，无法定位失败项。")
+    error_samples = diagnostics.get("api_error_samples", [])
+    if not isinstance(error_samples, list):
+        raise RuntimeError("fetch_diagnostics.api_error_samples 结构无效。")
+    failed_ts_codes = sorted({str(row.get("ts_code") or "").strip() for row in error_samples if isinstance(row, dict) and str(row.get("ts_code") or "").strip()})
+    if not failed_ts_codes:
+        return {
+            "generated_at": current_timestamp(),
+            "failed_ts_code_count": 0,
+            "success_ts_code_count": 0,
+            "failed_ts_codes": [],
+            "fetch_diagnostics": {},
+        }
+
+    token = _load_tushare_token(project_root / config.local_secret_path)
+    provider = TushareDataProvider(config, token, project_root)
+    refresh_result = provider.warm_api_cache_for_ts_codes(failed_ts_codes)
+    refresh_result["generated_at"] = current_timestamp()
+    refresh_result["failed_ts_code_count"] = len(failed_ts_codes)
+    return refresh_result
 
 
 def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapshot | None:
@@ -53,19 +91,25 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
     nav_path = raw_dir / "fund_nav_monthly.csv"
     benchmark_path = raw_dir / "benchmark_monthly.csv"
     manager_path = raw_dir / "manager_assignment_monthly.csv"
+    fund_type_audit_path = raw_dir / "fund_type_audit.csv"
     snapshot_path = raw_dir / "dataset_snapshot.json"
-    if not all(path.exists() for path in [entity_path, share_path, nav_path, benchmark_path, manager_path, snapshot_path]):
+    required_paths = [entity_path, share_path, nav_path, benchmark_path, manager_path, snapshot_path]
+    if not all(path.exists() for path in required_paths):
         return None
     metadata = read_json(snapshot_path)
     if not _cached_snapshot_matches_config(config, metadata):
         # raw 层是跨命令复用的共享缓存；这里必须先校验口径一致，否则 sample 与 tushare 会互相污染。
         return None
+    entity_rows = read_csv(entity_path)
+    share_rows = read_csv(share_path)
+    fund_type_audit_rows = read_csv(fund_type_audit_path) if fund_type_audit_path.exists() else _build_fund_type_audit_from_entity_cache(entity_rows, share_rows)
     return DatasetSnapshot(
-        fund_entity_master=read_csv(entity_path),
-        fund_share_class_map=read_csv(share_path),
+        fund_entity_master=entity_rows,
+        fund_share_class_map=share_rows,
         fund_nav_monthly=read_csv(nav_path),
         benchmark_monthly=read_csv(benchmark_path),
         manager_assignment_monthly=read_csv(manager_path),
+        fund_type_audit=fund_type_audit_rows,
         metadata=metadata,
     )
 
@@ -79,6 +123,7 @@ def persist_dataset(config: AppConfig, project_root: Path, dataset: DatasetSnaps
     write_csv(raw_dir / "fund_nav_monthly.csv", dataset.fund_nav_monthly)
     write_csv(raw_dir / "benchmark_monthly.csv", dataset.benchmark_monthly)
     write_csv(raw_dir / "manager_assignment_monthly.csv", dataset.manager_assignment_monthly)
+    write_csv(raw_dir / "fund_type_audit.csv", dataset.fund_type_audit)
     write_json(raw_dir / "dataset_snapshot.json", dataset.metadata)
 
 
@@ -105,35 +150,55 @@ def _cached_snapshot_matches_config(config: AppConfig, metadata: object) -> bool
     # 真实基金快照的规模口径升级后，需要主动淘汰旧缓存，否则会继续复用“代表份额规模”这一错误结果。
     if str(metadata.get("entity_asset_aggregation") or "").strip() != "sum_of_share_classes":
         return False
+    cached_benchmark = metadata.get("benchmark_config")
+    if cached_benchmark == benchmark_to_serializable_dict(config.benchmark):
+        return True
     benchmark_source = str(metadata.get("benchmark_source") or "").strip()
     if benchmark_source != config.benchmark.source:
         return False
-    if config.benchmark.source == "tushare_index":
-        cached_ts_code = str(metadata.get("benchmark_ts_code") or "").strip()
-        expected_ts_code = str(config.benchmark.ts_code or "").strip()
-        if cached_ts_code != expected_ts_code:
-            return False
+    cached_default_key = str(metadata.get("benchmark_default_key") or "").strip()
+    if cached_default_key and cached_default_key != config.benchmark.default_key:
+        return False
     return True
 
 
 class TushareDataProvider:
     """把 tushare 基金接口映射为项目内部的数据快照。"""
 
-    def __init__(self, config: AppConfig, token: str) -> None:
+    def __init__(self, config: AppConfig, token: str, project_root: Path) -> None:
         """初始化 tushare 客户端和依赖模块。"""
         self.config = config
         self.token = token
+        self.project_root = project_root
         self.pd = _require_module("pandas")
         self.tushare = _require_module("tushare")
         self.client = self.tushare.pro_api(token)
+        # 经理与净值接口是最慢的两类请求，缓存可以直接消除同一份额上的重复抓取。
+        self._manager_df_cache: dict[str, Any] = {}
+        self._monthly_nav_cache: dict[str, tuple[float, list[dict[str, object]]]] = {}
+        self._api_call_stats: dict[str, dict[str, object]] = defaultdict(lambda: {"calls": 0, "failures": 0, "elapsed_seconds": 0.0})
+        self._api_error_samples: list[dict[str, str]] = []
+        self._api_last_call_at: dict[str, float] = {}
+        # fund_nav 是当前最容易触发分钟限频的接口，默认先做轻度节流，避免无意义的失败重试。
+        self._api_min_interval_seconds = {
+            "fund_nav": 0.8,
+        }
+        self._api_cache_hits: dict[str, int] = defaultdict(int)
+        self._api_cache_misses: dict[str, int] = defaultdict(int)
 
     def fetch(self) -> DatasetSnapshot:
         """抓取基金主数据、经理、净值和规模，并组装成研究快照。"""
         # fund_basic 是基金场景的主入口；先拿到基金全集，再决定哪些份额会被归并成同一实体。
-        fund_basic = self.client.fund_basic(market=self.config.tushare.fund_market, status=self.config.tushare.fund_status)
+        fetch_started_at = time.monotonic()
+        fund_basic = self._call_api(
+            "fund_basic",
+            self.client.fund_basic,
+            market=self.config.tushare.fund_market,
+            status=self.config.tushare.fund_status,
+        )
         if fund_basic is None or fund_basic.empty:
             raise RuntimeError("Tushare fund_basic 返回空结果。")
-        company_df = self.client.fund_company()
+        company_df = self._call_api("fund_company", self.client.fund_company)
         company_lookup = _build_company_lookup(company_df)
         fund_basic = fund_basic.copy().sort_values("ts_code")
         if self.config.tushare.max_funds:
@@ -144,10 +209,18 @@ class TushareDataProvider:
         nav_rows: list[dict[str, object]] = []
         benchmark_rows: list[dict[str, object]] = []
         manager_rows: list[dict[str, object]] = []
+        fund_type_audit_rows: list[dict[str, object]] = []
         dropped_entities: list[dict[str, object]] = []
         grouped_rows = _group_share_classes(fund_basic.to_dict("records"))
-        for entity_id, rows in grouped_rows.items():
+        total_entities = len(grouped_rows)
+        for index, (entity_id, rows) in enumerate(grouped_rows.items(), start=1):
             representative_row = _select_representative_share_class(rows)
+            classification = classify_fund_type(
+                fund_type=str(representative_row.get("fund_type") or ""),
+                invest_type=str(representative_row.get("invest_type") or ""),
+                fund_name=str(representative_row.get("name") or representative_row["ts_code"]),
+                benchmark_text=str(representative_row.get("benchmark") or ""),
+            )
             # 后续特征和回测都以“基金实体”而不是份额类为单位，避免 A/C 份额重复入选。
             fund_company = str(representative_row.get("management") or "unknown")
             company_meta = company_lookup.get(fund_company, {})
@@ -160,7 +233,7 @@ class TushareDataProvider:
                         "entity_id": entity_id,
                         "entity_name": _normalize_entity_name(str(representative_row.get("name") or representative_row["ts_code"])),
                         "fund_company": str(representative_row.get("management") or "unknown"),
-                        "primary_type": _map_primary_type(str(representative_row.get("fund_type") or "")),
+                        "primary_type": classification["primary_type"],
                         "share_class_ids": "|".join(str(row["ts_code"]) for row in rows),
                         "share_class_count": len(rows),
                         "drop_reason": "no_valid_entity_monthly_nav",
@@ -174,7 +247,7 @@ class TushareDataProvider:
                 {
                     "entity_id": entity_id,
                     "entity_name": normalized_name,
-                    "primary_type": _map_primary_type(str(representative_row.get("fund_type") or "")),
+                    "primary_type": classification["primary_type"],
                     "fund_company": fund_company,
                     "fund_company_province": company_meta.get("province", ""),
                     "fund_company_city": company_meta.get("city", ""),
@@ -190,6 +263,21 @@ class TushareDataProvider:
                     "representative_share_class_id": representative_row["ts_code"],
                 }
             )
+            fund_type_audit_rows.append(
+                {
+                    "entity_id": entity_id,
+                    "entity_name": normalized_name,
+                    "share_class_id": str(representative_row["ts_code"]),
+                    "fund_name": str(representative_row.get("name") or representative_row["ts_code"]),
+                    "raw_fund_type": classification["raw_fund_type"],
+                    "raw_invest_type": classification["raw_invest_type"],
+                    "benchmark_text": str(representative_row.get("benchmark") or ""),
+                    "primary_type": classification["primary_type"],
+                    "rule_code": classification["rule_code"],
+                    "confidence": classification["confidence"],
+                    "reason": classification["reason"],
+                }
+            )
             for row in rows:
                 share_class_map.append(
                     {
@@ -200,6 +288,12 @@ class TushareDataProvider:
                     }
                 )
             nav_rows.extend(entity_nav_rows)
+            if index % self.config.tushare.progress_every_entities == 0 or index == total_entities:
+                print(
+                    f"[tushare] entities={index}/{total_entities} "
+                    f"retained={len(fund_entity_master)} dropped={len(dropped_entities)} "
+                    f"nav_rows={len(nav_rows)} manager_rows={len(manager_rows)}"
+                )
 
         month_set = sorted({str(row["month"]) for row in nav_rows})
         benchmark_rows = self._fetch_benchmark_rows(month_set)
@@ -211,6 +305,7 @@ class TushareDataProvider:
             fund_nav_monthly=nav_rows,
             benchmark_monthly=benchmark_rows,
             manager_assignment_monthly=manager_rows,
+            fund_type_audit=fund_type_audit_rows,
             metadata={
                 "source_name": "tushare",
                 "generated_at": current_timestamp(),
@@ -234,12 +329,69 @@ class TushareDataProvider:
                     "return_1m": "real",
                     "benchmark_return_1m": "real_from_tushare_index" if self.config.benchmark.source == "tushare_index" else "proxy_zero_pending_index_integration",
                 },
-                "benchmark_name": self.config.benchmark.name,
+                "benchmark_config": benchmark_to_serializable_dict(self.config.benchmark),
+                "benchmark_name": self.config.benchmark.series_for_key(self.config.benchmark.default_key).name,
                 "benchmark_source": self.config.benchmark.source,
-                "benchmark_ts_code": self.config.benchmark.ts_code,
+                "benchmark_ts_code": self.config.benchmark.series_for_key(self.config.benchmark.default_key).ts_code,
+                "benchmark_default_key": self.config.benchmark.default_key,
+                "benchmark_series": {
+                    key: {
+                        "name": series.name,
+                        "ts_code": series.ts_code,
+                    }
+                    for key, series in self.config.benchmark.series.items()
+                },
+                "benchmark_primary_type_map": self.config.benchmark.primary_type_map,
+                "fund_type_audit_summary": {
+                    "entity_count": len(fund_type_audit_rows),
+                    "by_primary_type": {
+                        primary_type_name: sum(1 for row in fund_type_audit_rows if row["primary_type"] == primary_type_name)
+                        for primary_type_name in sorted({str(row["primary_type"]) for row in fund_type_audit_rows})
+                    },
+                    "by_confidence": {
+                        confidence_name: sum(1 for row in fund_type_audit_rows if row["confidence"] == confidence_name)
+                        for confidence_name in sorted({str(row["confidence"]) for row in fund_type_audit_rows})
+                    },
+                },
+                "fetch_diagnostics": {
+                    "runtime_seconds": round(time.monotonic() - fetch_started_at, 3),
+                    "api_call_stats": self._api_call_stats_snapshot(),
+                    "api_cache_stats": self._api_cache_stats_snapshot(),
+                    "api_error_samples": self._api_error_samples,
+                },
                 "entity_asset_aggregation": "sum_of_share_classes",
             },
         )
+
+    def warm_api_cache_for_ts_codes(self, ts_codes: list[str]) -> dict[str, object]:
+        """只为指定失败份额补抓单接口缓存，供后续全量流程复用。"""
+        started_at = time.monotonic()
+        success_ts_codes: list[str] = []
+        failed_ts_codes: list[str] = []
+        for index, ts_code in enumerate(ts_codes, start=1):
+            manager_df = self._fetch_manager_df(ts_code)
+            _, nav_rows = self._fetch_monthly_nav_rows(ts_code, ts_code)
+            if manager_df is None or nav_rows == []:
+                failed_ts_codes.append(ts_code)
+            else:
+                success_ts_codes.append(ts_code)
+            if index % self.config.tushare.progress_every_entities == 0 or index == len(ts_codes):
+                print(
+                    f"[tushare-retry] ts_codes={index}/{len(ts_codes)} "
+                    f"success={len(success_ts_codes)} failed={len(failed_ts_codes)}"
+                )
+        return {
+            "runtime_seconds": round(time.monotonic() - started_at, 3),
+            "success_ts_code_count": len(success_ts_codes),
+            "failed_ts_code_count_after_retry": len(failed_ts_codes),
+            "success_ts_codes": success_ts_codes,
+            "failed_ts_codes_after_retry": failed_ts_codes,
+            "fetch_diagnostics": {
+                "api_call_stats": self._api_call_stats_snapshot(),
+                "api_cache_stats": self._api_cache_stats_snapshot(),
+                "api_error_samples": self._api_error_samples,
+            },
+        }
 
     def _fetch_current_manager(self, ts_code: str) -> tuple[str, str]:
         """获取基金当前在任经理及其任职开始日期。"""
@@ -261,10 +413,11 @@ class TushareDataProvider:
 
     def _fetch_manager_df(self, ts_code: str) -> Any:
         """抓取基金经理历史明细，失败时返回 None。"""
-        try:
-            return self.client.fund_manager(ts_code=ts_code)
-        except Exception:
-            return None
+        if ts_code in self._manager_df_cache:
+            return self._manager_df_cache[ts_code]
+        result = self._call_api("fund_manager", self.client.fund_manager, allow_failure=True, ts_code=ts_code)
+        self._manager_df_cache[ts_code] = result
+        return result
 
     def _build_manager_assignment_rows(
         self,
@@ -311,25 +464,28 @@ class TushareDataProvider:
 
     def _fetch_monthly_nav_rows(self, ts_code: str, entity_id: str) -> tuple[float, list[dict[str, object]]]:
         """把单份额净值和份额数据整理为月频净值与规模序列。"""
-        try:
-            nav_df = self.client.fund_nav(
-                ts_code=ts_code,
-                start_date=self.config.tushare.start_date,
-                end_date=self.config.tushare.end_date,
-            )
-        except Exception:
-            return 0.0, []
+        if ts_code in self._monthly_nav_cache:
+            return self._monthly_nav_cache[ts_code]
+        nav_df = self._call_api(
+            "fund_nav",
+            self.client.fund_nav,
+            allow_failure=True,
+            ts_code=ts_code,
+            start_date=self.config.tushare.start_date,
+            end_date=self.config.tushare.end_date,
+        )
         if nav_df is None or nav_df.empty:
-            return 0.0, []
-        try:
-            share_df = self.client.fund_share(
-                ts_code=ts_code,
-                start_date=self.config.tushare.start_date,
-                end_date=self.config.tushare.end_date,
-                market=self.config.tushare.fund_market,
-            )
-        except Exception:
-            share_df = None
+            self._monthly_nav_cache[ts_code] = (0.0, [])
+            return self._monthly_nav_cache[ts_code]
+        share_df = self._call_api(
+            "fund_share",
+            self.client.fund_share,
+            allow_failure=True,
+            ts_code=ts_code,
+            start_date=self.config.tushare.start_date,
+            end_date=self.config.tushare.end_date,
+            market=self.config.tushare.fund_market,
+        )
         share_lookup = _build_share_lookup(share_df)
         nav_df = nav_df.copy()
         nav_df["nav_date"] = nav_df["nav_date"].astype(str)
@@ -362,7 +518,8 @@ class TushareDataProvider:
             )
             previous_nav = current_nav
         latest_assets = monthly_rows[-1]["assets_cny_mn"] if monthly_rows else 0.0
-        return float(latest_assets), monthly_rows
+        self._monthly_nav_cache[ts_code] = (float(latest_assets), monthly_rows)
+        return self._monthly_nav_cache[ts_code]
 
     def _fetch_entity_monthly_nav_rows(self, share_class_rows: list[dict[str, object]], entity_id: str) -> tuple[float, list[dict[str, object]]]:
         """以代表份额承载收益序列，并把同实体各份额规模汇总到实体层。"""
@@ -395,27 +552,52 @@ class TushareDataProvider:
         """抓取市场基准并转换成月频收益序列。"""
         if not month_set:
             return []
-        if self.config.benchmark.source != "tushare_index" or not self.config.benchmark.ts_code:
-            return [
-                {
-                    "month": month,
-                    "benchmark_return_1m": 0.0,
-                    "benchmark_name": self.config.benchmark.name,
-                    "available_date": _normalize_date(f"{month[:4]}{month[5:7]}28"),
-                }
-                for month in month_set
-            ]
+        if self.config.benchmark.source != "tushare_index":
+            rows = []
+            for benchmark_key, series in self.config.benchmark.series.items():
+                for month in month_set:
+                    rows.append(
+                        {
+                            "month": month,
+                            "benchmark_key": benchmark_key,
+                            "benchmark_return_1m": 0.0,
+                            "benchmark_name": series.name,
+                            "benchmark_ts_code": series.ts_code or "",
+                            "available_date": _normalize_date(f"{month[:4]}{month[5:7]}28"),
+                        }
+                    )
+            return rows
 
+        rows: list[dict[str, object]] = []
+        series_cache: dict[str, list[dict[str, object]]] = {}
+        for benchmark_key, series in self.config.benchmark.series.items():
+            ts_code = str(series.ts_code or "").strip()
+            if not ts_code:
+                raise RuntimeError(f"benchmark {benchmark_key} 缺少 ts_code，无法抓取真实指数行情。")
+            if ts_code not in series_cache:
+                series_cache[ts_code] = self._fetch_single_benchmark_series(month_set, ts_code)
+            for row in series_cache[ts_code]:
+                benchmark_row = dict(row)
+                benchmark_row["benchmark_key"] = benchmark_key
+                benchmark_row["benchmark_name"] = series.name
+                benchmark_row["benchmark_ts_code"] = ts_code
+                rows.append(benchmark_row)
+        return rows
+
+    def _fetch_single_benchmark_series(self, month_set: list[str], ts_code: str) -> list[dict[str, object]]:
+        """抓取单条指数序列，并月度化成统一 benchmark 契约。"""
         start_date = f"{month_set[0][:4]}{month_set[0][5:7]}01"
         end_month = month_set[-1]
         end_date = f"{end_month[:4]}{end_month[5:7]}31"
-        index_df = self.client.index_daily(
-            ts_code=self.config.benchmark.ts_code,
+        index_df = self._call_api(
+            "index_daily",
+            self.client.index_daily,
+            ts_code=ts_code,
             start_date=start_date,
             end_date=end_date,
         )
         if index_df is None or index_df.empty:
-            raise RuntimeError(f"基准指数 {self.config.benchmark.ts_code} 未返回有效行情数据。")
+            raise RuntimeError(f"基准指数 {ts_code} 未返回有效行情数据。")
         index_df = index_df.copy()
         index_df["trade_date"] = index_df["trade_date"].astype(str)
         index_df = index_df.sort_values("trade_date")
@@ -439,8 +621,6 @@ class TushareDataProvider:
                         "benchmark_return_1m": 0.0,
                         "benchmark_close": "",
                         "benchmark_trade_date": "",
-                        "benchmark_name": self.config.benchmark.name,
-                        "benchmark_ts_code": self.config.benchmark.ts_code,
                         "available_date": "",
                     }
                 )
@@ -451,13 +631,153 @@ class TushareDataProvider:
                     "benchmark_return_1m": round(0.0 if previous_close in {None, 0} else close / previous_close - 1.0, 6),
                     "benchmark_close": round(close, 4),
                     "benchmark_trade_date": _normalize_date(monthly_trade_date[month]),
-                    "benchmark_name": self.config.benchmark.name,
-                    "benchmark_ts_code": self.config.benchmark.ts_code,
                     "available_date": _normalize_date(monthly_trade_date[month]),
                 }
             )
             previous_close = close
         return rows
+
+    def _call_api(
+        self,
+        api_name: str,
+        func: Any,
+        allow_failure: bool = False,
+        **kwargs: object,
+    ) -> Any:
+        """统一执行 Tushare 请求，记录耗时、失败和有限重试。"""
+        cached = self._read_api_cache(api_name, kwargs)
+        if cached is not None:
+            self._api_cache_hits[api_name] += 1
+            return cached
+        self._api_cache_misses[api_name] += 1
+        attempts = self.config.tushare.request_retry_count + 1
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            self._respect_api_interval(api_name)
+            started_at = time.monotonic()
+            try:
+                result = func(**kwargs)
+                self._record_api_call(api_name, time.monotonic() - started_at, failed=False)
+                self._api_last_call_at[api_name] = time.monotonic()
+                self._write_api_cache(api_name, kwargs, result)
+                if self.config.tushare.request_pause_ms > 0:
+                    time.sleep(self.config.tushare.request_pause_ms / 1000.0)
+                return result
+            except Exception as exc:
+                last_error = exc
+                self._record_api_call(api_name, time.monotonic() - started_at, failed=True)
+                self._api_last_call_at[api_name] = time.monotonic()
+                self._record_api_error(api_name, kwargs, exc, attempt)
+                if attempt < attempts:
+                    time.sleep(self._retry_delay_seconds(exc, attempt))
+                    continue
+        if allow_failure:
+            return None
+        raise RuntimeError(f"Tushare 接口 {api_name} 调用失败: {last_error}") from last_error
+
+    def _record_api_call(self, api_name: str, elapsed_seconds: float, *, failed: bool) -> None:
+        """累计接口调用统计。"""
+        stats = self._api_call_stats[api_name]
+        stats["calls"] = int(stats["calls"]) + 1
+        stats["elapsed_seconds"] = float(stats["elapsed_seconds"]) + elapsed_seconds
+        if failed:
+            stats["failures"] = int(stats["failures"]) + 1
+
+    def _record_api_error(self, api_name: str, kwargs: dict[str, object], exc: Exception, attempt: int) -> None:
+        """保留有限的错误样本，便于排查抓数阶段问题。"""
+        if len(self._api_error_samples) >= 50:
+            return
+        ts_code = str(kwargs.get("ts_code") or "")
+        self._api_error_samples.append(
+            {
+                "api_name": api_name,
+                "ts_code": ts_code,
+                "attempt": str(attempt),
+                "error": str(exc)[:300],
+            }
+        )
+
+    def _api_call_stats_snapshot(self) -> dict[str, dict[str, object]]:
+        """输出接口统计快照，供 metadata 和报告使用。"""
+        return {
+            api_name: {
+                "calls": int(payload["calls"]),
+                "failures": int(payload["failures"]),
+                "elapsed_seconds": round(float(payload["elapsed_seconds"]), 3),
+            }
+            for api_name, payload in sorted(self._api_call_stats.items())
+        }
+
+    def _api_cache_stats_snapshot(self) -> dict[str, dict[str, int]]:
+        """输出单接口缓存命中情况。"""
+        api_names = sorted(set(self._api_cache_hits) | set(self._api_cache_misses))
+        return {
+            api_name: {
+                "hits": int(self._api_cache_hits.get(api_name, 0)),
+                "misses": int(self._api_cache_misses.get(api_name, 0)),
+            }
+            for api_name in api_names
+        }
+
+    def _respect_api_interval(self, api_name: str) -> None:
+        """在真正发请求前按接口节流，减少命中外部分钟频率上限。"""
+        min_interval = self._api_min_interval_seconds.get(api_name, 0.0)
+        if min_interval <= 0:
+            return
+        previous_call_at = self._api_last_call_at.get(api_name)
+        if previous_call_at is None:
+            return
+        elapsed = time.monotonic() - previous_call_at
+        if elapsed < min_interval:
+            time.sleep(min_interval - elapsed)
+
+    def _retry_delay_seconds(self, exc: Exception, attempt: int) -> float:
+        """根据错误类型决定重试等待时间。"""
+        message = str(exc)
+        if "每分钟最多访问该接口" in message:
+            # 命中分钟限频时，短退避没有意义，直接拉长等待时间。
+            return min(20.0 * attempt, 60.0)
+        return min(0.5 * attempt, 2.0)
+
+    def _api_cache_dir(self) -> Path:
+        """返回单接口响应缓存目录。"""
+        return self.project_root / scope_artifact_dir(self.config.paths.raw_dir, self.config.data_source) / "api_cache"
+
+    def _api_cache_path(self, api_name: str, kwargs: dict[str, object]) -> Path:
+        """根据接口名和参数生成稳定缓存路径。"""
+        normalized = json.dumps({key: kwargs[key] for key in sorted(kwargs)}, ensure_ascii=False, sort_keys=True, default=str)
+        digest = hashlib.sha1(f"{api_name}|{normalized}".encode("utf-8")).hexdigest()[:16]
+        return self._api_cache_dir() / f"{api_name}__{digest}.json"
+
+    def _read_api_cache(self, api_name: str, kwargs: dict[str, object]) -> Any:
+        """读取单接口响应缓存；不存在时返回 None。"""
+        path = self._api_cache_path(api_name, kwargs)
+        if not path.exists():
+            return None
+        payload = read_json(path)
+        if not isinstance(payload, dict) or payload.get("kind") != "dataframe_records":
+            return None
+        rows = payload.get("rows", [])
+        if not isinstance(rows, list):
+            return None
+        return self.pd.DataFrame(rows)
+
+    def _write_api_cache(self, api_name: str, kwargs: dict[str, object], result: Any) -> None:
+        """把成功的单接口响应写入缓存，供后续增量复用。"""
+        if result is None:
+            return
+        rows = result.to_dict("records") if hasattr(result, "to_dict") else None
+        if rows is None:
+            return
+        write_json(
+            self._api_cache_path(api_name, kwargs),
+            {
+                "kind": "dataframe_records",
+                "api_name": api_name,
+                "params": {key: str(value) for key, value in sorted(kwargs.items())},
+                "rows": rows,
+            },
+        )
 
 
 def _require_module(module_name: str) -> Any:
@@ -484,6 +804,44 @@ def _build_company_lookup(company_df: Any) -> dict[str, dict[str, object]]:
         if row.get("shortname"):
             lookup[str(row["shortname"])] = payload
     return lookup
+
+
+def _build_fund_type_audit_from_entity_cache(
+    entity_rows: list[dict[str, object]],
+    share_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """兼容旧 raw 缓存缺少 fund_type_audit.csv 的情况，从实体快照回补类型审计表。"""
+    primary_share_lookup = {
+        str(row["entity_id"]): str(row["share_class_id"])
+        for row in share_rows
+        if int(str(row.get("is_primary_share_class") or "0")) == 1
+    }
+    audit_rows: list[dict[str, object]] = []
+    for entity in entity_rows:
+        classification = classify_fund_type(
+            fund_type=str(entity.get("primary_type") or ""),
+            invest_type=str(entity.get("invest_type") or ""),
+            fund_name=str(entity.get("entity_name") or entity.get("entity_id") or ""),
+            benchmark_text=str(entity.get("benchmark_text") or ""),
+        )
+        # 旧缓存已经丢失原始 fund_type，只能把当前实体类型当作一个弱代理值，因此置信度要主动下调。
+        confidence = "low" if classification["confidence"] != "low" else classification["confidence"]
+        audit_rows.append(
+            {
+                "entity_id": str(entity.get("entity_id") or ""),
+                "entity_name": str(entity.get("entity_name") or ""),
+                "share_class_id": primary_share_lookup.get(str(entity.get("entity_id") or ""), str(entity.get("representative_share_class_id") or "")),
+                "fund_name": str(entity.get("entity_name") or ""),
+                "raw_fund_type": str(entity.get("primary_type") or ""),
+                "raw_invest_type": str(entity.get("invest_type") or ""),
+                "benchmark_text": str(entity.get("benchmark_text") or ""),
+                "primary_type": str(entity.get("primary_type") or classification["primary_type"]),
+                "rule_code": "legacy_cache_backfill",
+                "confidence": confidence,
+                "reason": "旧 raw 缓存缺少原始类型审计表，本次由实体缓存字段回补，结论仅供过渡审计使用。",
+            }
+        )
+    return audit_rows
 
 
 def _group_share_classes(rows: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
@@ -592,16 +950,6 @@ def _preferred_asset_value(row: Any, share_lookup: list[tuple[str, float]]) -> f
         return 0.0
     # fund_share 的 fd_share 单位为“万份”，因此资产规模近似换算为 百万元 = 份额(万) * 净值 / 100。
     return latest_share * nav_value / 100.0
-
-
-def _map_primary_type(fund_type: str) -> str:
-    """把 tushare 的基金类型粗映射到项目当前的研究类型。"""
-    if "股票" in fund_type:
-        return "主动股票"
-    if "混合" in fund_type:
-        return "偏股混合"
-    return "其他"
-
 
 def _manager_record_matches_month(row: dict[str, object], month: str) -> bool:
     """判断一条经理任职记录在某个月是否处于在任状态。"""

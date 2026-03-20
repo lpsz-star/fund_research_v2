@@ -3,6 +3,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from collections import defaultdict
 from pathlib import Path
 from unittest import mock
 
@@ -13,9 +14,11 @@ from fund_research_v2.backtest.engine import run_backtest
 from fund_research_v2.cli import main
 from fund_research_v2.common.config import load_config
 from fund_research_v2.common.date_utils import add_months, is_available_by_month_end, iter_months, month_end
-from fund_research_v2.common.workflows import prepare_bundle, run_experiment_command, run_portfolio_command, run_universe_command
+from fund_research_v2.common.workflows import fetch_failed_command, prepare_bundle, run_experiment_command, run_portfolio_command, run_universe_command
 from fund_research_v2.data_ingestion.providers import DatasetSnapshot, load_cached_dataset
 from fund_research_v2.data_ingestion.providers import TushareDataProvider
+from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
+from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
 from fund_research_v2.features.feature_builder import build_feature_rows
 from fund_research_v2.portfolio.construction import build_portfolio
 from fund_research_v2.reporting.reports import render_universe_audit_report
@@ -31,7 +34,7 @@ class PipelineTest(unittest.TestCase):
             "lookback_months": 48,
             "local_secret_path": "configs/local.json",
             "universe": {
-                "allowed_primary_types": ["主动股票", "偏股混合"],
+                "allowed_primary_types": ["主动股票", "偏股混合", "灵活配置混合"],
                 "exclude_name_keywords": ["ETF", "联接", "指数", "LOF", "FOF", "QDII", "债", "货币"],
                 "min_history_months": 24,
                 "min_assets_cny_mn": 200.0
@@ -58,8 +61,22 @@ class PipelineTest(unittest.TestCase):
             },
             "benchmark": {
                 "source": "sample",
-                "ts_code": None,
-                "name": "sample_benchmark"
+                "default_key": "broad_equity",
+                "series": {
+                    "broad_equity": {
+                        "ts_code": None,
+                        "name": "中证800样例基准"
+                    },
+                    "large_cap_equity": {
+                        "ts_code": None,
+                        "name": "沪深300样例基准"
+                    }
+                },
+                "primary_type_map": {
+                    "主动股票": "broad_equity",
+                    "偏股混合": "large_cap_equity",
+                    "灵活配置混合": "broad_equity"
+                }
             },
             "reporting": {
                 "top_ranked_limit": 8
@@ -109,29 +126,112 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "fund_universe_monthly.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "manager_assignment_monthly.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "dropped_entities.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "fund_type_audit.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "feature") / "fund_feature_monthly.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "fund_score_monthly.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "portfolio_target_monthly.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "portfolio_snapshot.json").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "backtest_summary.json").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_evaluation.json").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_evaluation.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "factor_evaluation_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "portfolio_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "ingestion_audit_report.md").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "fund_type_audit_report.md").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "fetch_diagnostics_report.md").exists())
         report_text = (self._scoped_output_dir(root, "sample", "reports") / "experiment_report.md").read_text(encoding="utf-8")
         self.assertIn("Experiment Context", report_text)
+        self.assertIn("Benchmark Mapping", report_text)
         self.assertIn("Latest Ranking Snapshot", report_text)
         self.assertIn("Time Boundary Notes", report_text)
         self.assertIn("Backtest Summary", report_text)
         portfolio_report = (self._scoped_output_dir(root, "sample", "reports") / "portfolio_report.md").read_text(encoding="utf-8")
         self.assertIn("Decision Context", portfolio_report)
+        self.assertIn("Benchmark Mapping", portfolio_report)
         self.assertIn("Time Boundary Notes", portfolio_report)
         self.assertIn("Selected Portfolio", portfolio_report)
         universe_audit_report = (self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").read_text(encoding="utf-8")
         self.assertIn("Latest Month Funnel", universe_audit_report)
+        self.assertIn("Type Funnel", universe_audit_report)
         self.assertIn("Reason Counts", universe_audit_report)
         ingestion_audit_report = (self._scoped_output_dir(root, "sample", "reports") / "ingestion_audit_report.md").read_text(encoding="utf-8")
         self.assertIn("Ingestion Funnel", ingestion_audit_report)
         self.assertIn("Dropped Entities", ingestion_audit_report)
+        fund_type_report = (self._scoped_output_dir(root, "sample", "reports") / "fund_type_audit_report.md").read_text(encoding="utf-8")
+        self.assertIn("By Primary Type", fund_type_report)
+        self.assertIn("Sample Rows", fund_type_report)
+        fetch_report = (self._scoped_output_dir(root, "sample", "reports") / "fetch_diagnostics_report.md").read_text(encoding="utf-8")
+        self.assertIn("Fetch Diagnostics Report", fetch_report)
+
+    def test_fetch_failed_command_writes_retry_summary_and_report(self) -> None:
+        """验证失败增量补抓会基于上次错误样本生成补抓摘要与报告。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config = self._base_config(root)
+        config["data_source"] = "tushare"
+        config["tushare"]["download_enabled"] = True
+        config["tushare"]["use_cached_raw"] = True
+        config_path = self._write_config(root, config)
+        (root / "configs").mkdir(parents=True, exist_ok=True)
+        (root / "configs" / "local.json").write_text(json.dumps({"tushare_token": "dummy-token"}), encoding="utf-8")
+        raw_dir = self._scoped_raw_dir(root, "tushare")
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        (raw_dir / "dataset_snapshot.json").write_text(
+            json.dumps(
+                {
+                    "source_name": "tushare",
+                    "fetch_diagnostics": {
+                        "api_error_samples": [
+                            {"api_name": "fund_nav", "ts_code": "000001.OF", "attempt": "1", "error": "rate limit"},
+                            {"api_name": "fund_share", "ts_code": "000001.OF", "attempt": "1", "error": "rate limit"},
+                            {"api_name": "fund_nav", "ts_code": "000002.OF", "attempt": "1", "error": "timeout"},
+                        ]
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        class FakeProvider:
+            """隔离外部依赖，只验证失败份额提取与结果落盘。"""
+
+            def __init__(self, config, token, project_root) -> None:
+                self.config = config
+                self.token = token
+                self.project_root = project_root
+
+            def warm_api_cache_for_ts_codes(self, ts_codes: list[str]) -> dict[str, object]:
+                self.ts_codes = ts_codes
+                return {
+                    "runtime_seconds": 1.23,
+                    "success_ts_code_count": 1,
+                    "failed_ts_code_count_after_retry": 1,
+                    "success_ts_codes": ["000001.OF"],
+                    "failed_ts_codes_after_retry": ["000002.OF"],
+                    "fetch_diagnostics": {
+                        "api_call_stats": {"fund_nav": {"calls": 2, "failures": 1, "elapsed_seconds": 0.8}},
+                        "api_cache_stats": {"fund_nav": {"hits": 0, "misses": 2}},
+                        "api_error_samples": [{"api_name": "fund_nav", "ts_code": "000002.OF", "attempt": "1", "error": "timeout"}],
+                    },
+                }
+
+        with mock.patch("fund_research_v2.data_ingestion.providers.TushareDataProvider", FakeProvider):
+            fetch_failed_command(config_path)
+
+        summary_path = self._scoped_output_dir(root, "tushare", "result") / "fetch_retry_summary.json"
+        report_path = self._scoped_output_dir(root, "tushare", "reports") / "fetch_retry_report.md"
+        self.assertTrue(summary_path.exists())
+        self.assertTrue(report_path.exists())
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        self.assertEqual(summary["failed_ts_code_count"], 2)
+        self.assertEqual(summary["success_ts_code_count"], 1)
+        self.assertEqual(summary["failed_ts_codes_after_retry"], ["000002.OF"])
+        report_text = report_path.read_text(encoding="utf-8")
+        self.assertIn("Fetch Retry Report", report_text)
+        self.assertIn("failed_ts_code_count: 2", report_text)
+        self.assertIn("000002.OF", report_text)
 
     def test_run_portfolio_writes_outputs_without_backtest_artifacts(self) -> None:
         """验证独立组合流程不会误产出回测结果，避免命令职责边界混乱。"""
@@ -151,6 +251,15 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("Selected Portfolio", report_text)
         self.assertIn("High Ranked But Not Selected", report_text)
 
+    def test_cli_dispatches_fetch_failed_command(self) -> None:
+        """验证 CLI 已暴露失败增量补抓入口，避免工作流存在实现但无法调用。"""
+        with mock.patch("fund_research_v2.cli.fetch_failed_command") as mocked_command:
+            with mock.patch.object(sys, "argv", ["fund_research_v2", "fetch-failed", "--config", "configs/default.json"]):
+                exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        mocked_command.assert_called_once_with(Path("configs/default.json"))
+
     def test_run_universe_writes_audit_report(self) -> None:
         """验证只跑基金池时仍会输出可审计报告，而不是只留下裸 CSV。"""
         root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
@@ -162,6 +271,7 @@ class PipelineTest(unittest.TestCase):
         audit_report = (self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").read_text(encoding="utf-8")
         self.assertIn("Audit Context", audit_report)
         self.assertIn("Latest Month Funnel", audit_report)
+        self.assertIn("Type Funnel", audit_report)
         self.assertIn("Eligible Funds", audit_report)
         ingestion_report = (self._scoped_output_dir(root, "sample", "reports") / "ingestion_audit_report.md").read_text(encoding="utf-8")
         self.assertIn("Ingestion Funnel", ingestion_report)
@@ -204,6 +314,7 @@ class PipelineTest(unittest.TestCase):
             ],
             benchmark_monthly=[{"month": "2026-01", "benchmark_return_1m": 0.0}, {"month": "2026-02", "benchmark_return_1m": 0.0}],
             manager_assignment_monthly=[],
+            fund_type_audit=[],
             metadata={},
         )
 
@@ -244,6 +355,7 @@ class PipelineTest(unittest.TestCase):
             ],
             benchmark_monthly=[{"month": "2026-02", "benchmark_return_1m": 0.0}],
             manager_assignment_monthly=[],
+            fund_type_audit=[],
             metadata={"source_name": "sample"},
         )
         universe = build_universe(load_config(config_path), dataset)
@@ -293,6 +405,7 @@ class PipelineTest(unittest.TestCase):
             ],
             benchmark_monthly=[{"month": "2026-01", "benchmark_return_1m": 0.0}, {"month": "2026-02", "benchmark_return_1m": 0.0}],
             manager_assignment_monthly=[],
+            fund_type_audit=[],
             metadata={},
         )
 
@@ -331,6 +444,7 @@ class PipelineTest(unittest.TestCase):
                 {"month": "2026-03", "benchmark_return_1m": 0.0},
             ],
             manager_assignment_monthly=[],
+            fund_type_audit=[],
             metadata={},
         )
         universe = type("UniverseLike", (), {"rows": [
@@ -373,6 +487,7 @@ class PipelineTest(unittest.TestCase):
                 {"month": "2026-02", "benchmark_return_1m": 0.5, "available_date": "2026-03-03"},
             ],
             manager_assignment_monthly=[],
+            fund_type_audit=[],
             metadata={},
         )
         universe = type("UniverseLike", (), {"rows": [
@@ -498,6 +613,7 @@ class PipelineTest(unittest.TestCase):
                 {"entity_id": "SHIFT", "month": "2025-12", "manager_name": "老经理", "manager_start_month": "2024-06", "manager_end_month": "2025-12"},
                 {"entity_id": "SHIFT", "month": "2026-01", "manager_name": "现任经理", "manager_start_month": "2026-01", "manager_end_month": ""},
             ],
+            fund_type_audit=[],
             metadata={},
         )
         universe = type("UniverseLike", (), {"rows": [
@@ -549,6 +665,7 @@ class PipelineTest(unittest.TestCase):
             ],
             benchmark_monthly=[{"month": "2026-03", "benchmark_return_1m": 0.0}],
             manager_assignment_monthly=[],
+            fund_type_audit=[],
             metadata={},
         )
         universe = type("UniverseLike", (), {"rows": [
@@ -626,8 +743,22 @@ class PipelineTest(unittest.TestCase):
         tushare_config["data_source"] = "tushare"
         tushare_config["benchmark"] = {
             "source": "tushare_index",
-            "ts_code": "000906.SH",
-            "name": "中证800"
+            "default_key": "broad_equity",
+            "series": {
+                "broad_equity": {
+                    "ts_code": "000906.SH",
+                    "name": "中证800"
+                },
+                "large_cap_equity": {
+                    "ts_code": "000300.SH",
+                    "name": "沪深300"
+                }
+            },
+            "primary_type_map": {
+                "主动股票": "broad_equity",
+                "偏股混合": "large_cap_equity",
+                "灵活配置混合": "broad_equity"
+            }
         }
         tushare_config["tushare"]["download_enabled"] = False
         tushare_config["tushare"]["use_cached_raw"] = True
@@ -668,6 +799,290 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(entity_nav_rows[-1]["assets_cny_mn"], 165.0)
         self.assertEqual(entity_nav_rows[0]["assets_cny_mn"], 150.0)
         self.assertEqual(entity_nav_rows[-1]["return_1m"], 0.02)
+
+    def test_fetch_manager_df_uses_cache(self) -> None:
+        """验证同一 ts_code 的经理接口只抓一次，避免在当前经理和月频映射中重复请求。"""
+        provider = object.__new__(TushareDataProvider)
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        provider.project_root = root
+        provider.config = type(
+            "ConfigLike",
+            (),
+            {
+                "data_source": "tushare",
+                "paths": type("PathsLike", (), {"raw_dir": Path("data/raw")})(),
+                "tushare": type("TushareLike", (), {"request_retry_count": 0, "request_pause_ms": 0})(),
+            },
+        )()
+        provider._manager_df_cache = {}
+        provider._monthly_nav_cache = {}
+        provider._api_call_stats = defaultdict(lambda: {"calls": 0, "failures": 0, "elapsed_seconds": 0.0})
+        provider._api_error_samples = []
+        provider._api_last_call_at = {}
+        provider._api_min_interval_seconds = {}
+        provider._api_cache_hits = defaultdict(int)
+        provider._api_cache_misses = defaultdict(int)
+        import pandas as pd
+        provider.pd = pd
+
+        class ClientLike:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def fund_manager(self, ts_code: str):
+                self.calls += 1
+                return pd.DataFrame([{"ts_code": ts_code}])
+
+        provider.client = ClientLike()
+
+        first = provider._fetch_manager_df("TEST.OF")
+        second = provider._fetch_manager_df("TEST.OF")
+
+        self.assertEqual(first.to_dict("records"), second.to_dict("records"))
+        self.assertEqual(provider.client.calls, 1)
+
+    def test_api_call_uses_persisted_disk_cache(self) -> None:
+        """验证单接口响应会落到磁盘缓存，并在新 provider 实例中直接命中。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        import pandas as pd
+
+        def build_provider() -> TushareDataProvider:
+            provider = object.__new__(TushareDataProvider)
+            provider.project_root = root
+            provider.config = type(
+                "ConfigLike",
+                (),
+                {
+                    "data_source": "tushare",
+                    "paths": type("PathsLike", (), {"raw_dir": Path("data/raw")})(),
+                    "tushare": type("TushareLike", (), {"request_retry_count": 0, "request_pause_ms": 0})(),
+                },
+            )()
+            provider._manager_df_cache = {}
+            provider._monthly_nav_cache = {}
+            provider._api_call_stats = defaultdict(lambda: {"calls": 0, "failures": 0, "elapsed_seconds": 0.0})
+            provider._api_error_samples = []
+            provider._api_last_call_at = {}
+            provider._api_min_interval_seconds = {}
+            provider._api_cache_hits = defaultdict(int)
+            provider._api_cache_misses = defaultdict(int)
+            provider.pd = pd
+            return provider
+
+        class FuncLike:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(self, **kwargs):
+                self.calls += 1
+                return pd.DataFrame([{"ts_code": kwargs["ts_code"], "value": 1}])
+
+        first_provider = build_provider()
+        first_func = FuncLike()
+        first_result = first_provider._call_api("fund_manager", first_func, ts_code="TEST.OF")
+        self.assertEqual(first_func.calls, 1)
+        self.assertEqual(first_provider._api_cache_misses["fund_manager"], 1)
+
+        second_provider = build_provider()
+        second_func = FuncLike()
+        second_result = second_provider._call_api("fund_manager", second_func, ts_code="TEST.OF")
+
+        self.assertEqual(second_func.calls, 0)
+        self.assertEqual(second_provider._api_cache_hits["fund_manager"], 1)
+        self.assertEqual(first_result.to_dict("records"), second_result.to_dict("records"))
+
+    def test_fund_type_classifier_distinguishes_active_index_and_mixed_styles(self) -> None:
+        """验证基金类型标准化规则能识别主动股票、被动指数、指数增强和灵活配置混合。"""
+        self.assertEqual(
+            classify_fund_type(
+                fund_type="普通股票型基金",
+                invest_type="契约型开放式",
+                fund_name="景行成长A",
+                benchmark_text="沪深300收益率*80%+中债综合指数收益率*20%",
+            )["primary_type"],
+            "主动股票",
+        )
+        self.assertEqual(
+            classify_fund_type(
+                fund_type="股票型基金",
+                invest_type="被动指数型",
+                fund_name="沪深300ETF联接A",
+                benchmark_text="沪深300指数收益率*95%+银行活期存款利率(税后)*5%",
+            )["primary_type"],
+            "被动指数",
+        )
+        self.assertEqual(
+            classify_fund_type(
+                fund_type="混合型基金",
+                invest_type="指数增强型",
+                fund_name="中证500指数增强A",
+                benchmark_text="中证500指数收益率*95%+活期存款利率*5%",
+            )["primary_type"],
+            "指数增强",
+        )
+        self.assertEqual(
+            classify_fund_type(
+                fund_type="混合型基金",
+                invest_type="灵活配置型",
+                fund_name="灵活配置精选A",
+                benchmark_text="沪深300收益率*60%+中债综合指数收益率*40%",
+            )["primary_type"],
+            "灵活配置混合",
+        )
+
+    def test_fund_type_classifier_marks_unknown_case_as_low_confidence_other(self) -> None:
+        """验证未命中规则的基金会回退到其他，并显式标记为低置信度。"""
+        result = classify_fund_type(
+            fund_type="另类投资基金",
+            invest_type="创新型",
+            fund_name="量化对冲一号",
+            benchmark_text="绝对收益目标",
+        )
+
+        self.assertEqual(result["primary_type"], "其他")
+        self.assertEqual(result["confidence"], "low")
+        self.assertEqual(result["rule_code"], "fallback_other")
+
+    def test_factor_evaluation_respects_factor_direction(self) -> None:
+        """验证因子评估会按高值/低值方向解释下一月收益。"""
+        feature_rows = [
+            {"entity_id": "A", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.9, "ret_6m": 0.9, "excess_ret_12m": 0.9, "max_drawdown_12m": -0.1, "vol_12m": 0.05, "downside_vol_12m": 0.03, "manager_tenure_months": 24, "asset_stability_12m": 0.1},
+            {"entity_id": "B", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.1, "ret_6m": 0.1, "excess_ret_12m": 0.1, "max_drawdown_12m": -0.3, "vol_12m": 0.2, "downside_vol_12m": 0.15, "manager_tenure_months": 6, "asset_stability_12m": 0.6},
+        ]
+        nav_rows = [
+            {"entity_id": "A", "month": "2026-02", "return_1m": 0.04},
+            {"entity_id": "B", "month": "2026-02", "return_1m": -0.02},
+        ]
+
+        result = evaluate_factors(feature_rows, nav_rows)
+        row_map = {str(row["factor_name"]): row for row in result["factor_rows"]}
+
+        self.assertEqual(int(row_map["ret_12m"]["direction_ok"]), 1)
+        self.assertEqual(int(row_map["vol_12m"]["direction_ok"]), 1)
+        self.assertGreater(float(row_map["ret_12m"]["avg_rankic"]), 0.0)
+        self.assertGreater(float(row_map["vol_12m"]["avg_rankic"]), 0.0)
+
+    def test_factor_evaluation_skips_months_without_next_return(self) -> None:
+        """验证缺少下一月收益时，因子评估会安全跳过该月而不是报错。"""
+        feature_rows = [
+            {"entity_id": "A", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.2, "ret_6m": 0.2, "excess_ret_12m": 0.2, "max_drawdown_12m": -0.1, "vol_12m": 0.1, "downside_vol_12m": 0.08, "manager_tenure_months": 12, "asset_stability_12m": 0.2},
+            {"entity_id": "B", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.1, "ret_6m": 0.1, "excess_ret_12m": 0.1, "max_drawdown_12m": -0.2, "vol_12m": 0.2, "downside_vol_12m": 0.15, "manager_tenure_months": 8, "asset_stability_12m": 0.3},
+        ]
+        nav_rows: list[dict[str, object]] = []
+
+        result = evaluate_factors(feature_rows, nav_rows)
+
+        self.assertEqual(int(result["summary"]["factor_count"]), 8)
+        self.assertTrue(all(int(row["evaluation_months"]) == 0 for row in result["factor_rows"]))
+
+    def test_feature_builder_uses_type_mapped_benchmark(self) -> None:
+        """验证不同 primary_type 会映射到不同 benchmark 序列，而不是统一扣同一条市场基准。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config = load_config(self._write_config(root, self._base_config(root)))
+        dataset = DatasetSnapshot(
+            fund_entity_master=[
+                {
+                    "entity_id": "EQ",
+                    "entity_name": "股票基金",
+                    "primary_type": "主动股票",
+                    "fund_company": "测试基金",
+                    "manager_name": "经理甲",
+                    "manager_start_month": "2024-01",
+                    "inception_month": "2020-01",
+                    "latest_assets_cny_mn": 500.0,
+                    "status": "L",
+                },
+                {
+                    "entity_id": "MIX",
+                    "entity_name": "混合基金",
+                    "primary_type": "偏股混合",
+                    "fund_company": "测试基金",
+                    "manager_name": "经理乙",
+                    "manager_start_month": "2024-01",
+                    "inception_month": "2020-01",
+                    "latest_assets_cny_mn": 500.0,
+                    "status": "L",
+                },
+            ],
+            fund_share_class_map=[],
+            fund_nav_monthly=[
+                {"entity_id": "EQ", "month": "2026-01", "nav_date": "2026-01-31", "available_date": "2026-01-31", "nav": 1.0, "return_1m": 0.01, "assets_cny_mn": 500.0},
+                {"entity_id": "EQ", "month": "2026-02", "nav_date": "2026-02-28", "available_date": "2026-02-28", "nav": 1.03, "return_1m": 0.02, "assets_cny_mn": 500.0},
+                {"entity_id": "MIX", "month": "2026-01", "nav_date": "2026-01-31", "available_date": "2026-01-31", "nav": 1.0, "return_1m": 0.01, "assets_cny_mn": 500.0},
+                {"entity_id": "MIX", "month": "2026-02", "nav_date": "2026-02-28", "available_date": "2026-02-28", "nav": 1.03, "return_1m": 0.02, "assets_cny_mn": 500.0},
+            ],
+            benchmark_monthly=[
+                {"month": "2026-01", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.01, "available_date": "2026-01-31"},
+                {"month": "2026-02", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.03, "available_date": "2026-02-28"},
+                {"month": "2026-01", "benchmark_key": "large_cap_equity", "benchmark_return_1m": 0.005, "available_date": "2026-01-31"},
+                {"month": "2026-02", "benchmark_key": "large_cap_equity", "benchmark_return_1m": 0.01, "available_date": "2026-02-28"},
+            ],
+            manager_assignment_monthly=[],
+            fund_type_audit=[],
+            metadata={},
+        )
+        universe = type("UniverseLike", (), {"rows": [
+            {"entity_id": "EQ", "month": "2026-01", "is_eligible": 1},
+            {"entity_id": "EQ", "month": "2026-02", "is_eligible": 1},
+            {"entity_id": "MIX", "month": "2026-01", "is_eligible": 1},
+            {"entity_id": "MIX", "month": "2026-02", "is_eligible": 1},
+        ]})()
+
+        rows = build_feature_rows(config, dataset, universe)
+        row_map = {(str(row["entity_id"]), str(row["month"])): row for row in rows}
+
+        self.assertEqual(row_map[("EQ", "2026-02")]["benchmark_key"], "broad_equity")
+        self.assertEqual(row_map[("MIX", "2026-02")]["benchmark_key"], "large_cap_equity")
+        self.assertAlmostEqual(float(row_map[("EQ", "2026-02")]["excess_ret_12m"]), -0.0101, places=6)
+        self.assertAlmostEqual(float(row_map[("MIX", "2026-02")]["excess_ret_12m"]), 0.01515, places=6)
+
+    def test_backtest_uses_weighted_type_mapped_benchmark(self) -> None:
+        """验证回测基准收益会按组合内基金类型权重聚合，而不是固定使用单一指数。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["backtest"]["start_month"] = "2026-01"
+        config_payload["backtest"]["end_month"] = "2026-02"
+        config_payload["portfolio"]["portfolio_size"] = 2
+        config_payload["portfolio"]["single_fund_cap"] = 0.5
+        config = load_config(self._write_config(root, config_payload))
+        score_rows = [
+            {
+                "entity_id": "EQ",
+                "month": "2026-01",
+                "entity_name": "股票基金",
+                "fund_company": "甲公司",
+                "primary_type": "主动股票",
+                "rank": 1,
+                "total_score": 1.0,
+            },
+            {
+                "entity_id": "MIX",
+                "month": "2026-01",
+                "entity_name": "混合基金",
+                "fund_company": "乙公司",
+                "primary_type": "偏股混合",
+                "rank": 2,
+                "total_score": 0.9,
+            },
+        ]
+        nav_rows = [
+            {"entity_id": "EQ", "month": "2026-02", "return_1m": 0.05},
+            {"entity_id": "MIX", "month": "2026-02", "return_1m": 0.03},
+        ]
+        benchmark_rows = [
+            {"month": "2026-02", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.02},
+            {"month": "2026-02", "benchmark_key": "large_cap_equity", "benchmark_return_1m": 0.01},
+        ]
+
+        rows = run_backtest(config, score_rows, nav_rows, benchmark_rows)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["benchmark_mix"], "broad_equity:0.5|large_cap_equity:0.5")
+        self.assertAlmostEqual(float(rows[0]["benchmark_return"]), 0.015, places=6)
 
 
 if __name__ == "__main__":

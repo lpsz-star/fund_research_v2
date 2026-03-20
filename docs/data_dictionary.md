@@ -67,7 +67,13 @@
   - 当前值通常为：
     - `主动股票`
     - `偏股混合`
+    - `灵活配置混合`
+    - `被动指数`
+    - `指数增强`
+    - `偏债混合`
     - `其他`
+  - 当前说明：
+    - 这是项目内部标准化后的研究类型，不再简单等于 tushare 原始 `fund_type`
 - `fund_company`
   - 类型：字符串
   - 含义：基金管理人名称
@@ -184,12 +190,20 @@
 
 作用：
 
-- 保存月频 benchmark 收益序列
+- 保存月频 benchmark 收益序列，可同时容纳多条指数
 
 字段说明：
 
 - `month`
   - 含义：月份索引
+- `benchmark_key`
+  - 类型：字符串
+  - 含义：项目内部 benchmark 标识
+  - 当前默认示例：
+    - `broad_equity`
+    - `large_cap_equity`
+  - 当前用途：
+    - 让不同 `primary_type` 可以映射到不同公开指数
 - `benchmark_return_1m`
   - 类型：浮点数
   - 含义：benchmark 当月收益
@@ -210,6 +224,10 @@
   - 含义：benchmark 名称
 - `benchmark_ts_code`
   - 含义：benchmark 代码
+  - 当前默认映射：
+    - `主动股票 -> broad_equity -> 中证800 (000906.SH)`
+    - `偏股混合 -> large_cap_equity -> 沪深300 (000300.SH)`
+    - `灵活配置混合 -> broad_equity -> 中证800 (000906.SH)`
 
 ## 6. `fund_universe_monthly.csv`
 
@@ -258,9 +276,49 @@
   - 类型：字符串或空
   - 含义：该月净值在研究流程中变得可见的日期
 - `primary_type`
-  - 含义：项目内部粗分类
+  - 含义：项目内部标准研究类型
 
-## 7. `manager_assignment_monthly.csv`
+## 7. `fund_type_audit.csv`
+
+作用：
+
+- 保存基金类型标准化的原始输入、命中规则和置信度
+
+字段说明：
+
+- `entity_id`
+  - 含义：基金实体 ID
+- `entity_name`
+  - 含义：基金实体名称
+- `share_class_id`
+  - 含义：承载分类判断的代表份额代码
+- `fund_name`
+  - 含义：代表份额名称
+- `raw_fund_type`
+  - 含义：tushare `fund_basic.fund_type` 原始值
+- `raw_invest_type`
+  - 含义：tushare `fund_basic.invest_type` 原始值
+- `benchmark_text`
+  - 含义：基金合同业绩比较基准文本
+- `primary_type`
+  - 含义：标准化后的项目类型标签
+- `rule_code`
+  - 含义：命中的规则编号
+- `confidence`
+  - 含义：分类置信度
+  - 当前值通常为：
+    - `high`
+    - `medium`
+    - `low`
+- `reason`
+  - 含义：中文解释，说明为什么命中当前规则
+
+当前作用：
+
+- 为 benchmark 映射和基金池准入提供可审计的类型来源
+- 为后续抽查误分基金、继续迭代规则提供标准证据
+
+## 8. `manager_assignment_monthly.csv`
 
 作用：
 
@@ -336,7 +394,7 @@
   - 类型：浮点数
   - 含义：近 12 个月规模波动幅度
 
-## 7. `fund_feature_monthly.csv`
+## 9. `fund_feature_monthly.csv`
 
 作用：
 
@@ -373,7 +431,7 @@
   - 近 12 个月规模波动幅度
   - 只基于当月月末前已可见的历史规模记录
 
-## 8. `fund_score_monthly.csv`
+## 10. `fund_score_monthly.csv`
 
 作用：
 
