@@ -80,10 +80,9 @@
 6. [docs/strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)
 7. [docs/factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
 8. [docs/backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
-9. [docs/roadmap.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/roadmap.md)
-10. [docs/experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
-11. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
-12. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
+9. [docs/experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
+10. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
+11. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
 
 这些文档分别覆盖：
 
@@ -91,7 +90,6 @@
 - 数据表结构与字段定义
 - 历史月份与最新快照的时点边界
 - 当前策略、因子与回测口径
-- 主线迭代顺序与里程碑
 - 实验运行方式与可比性判断
 - 已知错误与近期变更
 
@@ -104,7 +102,6 @@
 - [strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)：当前策略范围与研究口径
 - [factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)：当前已实现因子、合成分与评分逻辑
 - [backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)：信号时点、执行时点、成本与回测边界
-- [roadmap.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/roadmap.md)：从当前研究平台走向更可信 baseline 与小资金试运行的主线路线图
 - [experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)：实验运行、结果阅读、可比性判断
 - [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
 - [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)：主线迭代的变更记录
