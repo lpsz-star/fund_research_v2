@@ -280,6 +280,16 @@
   - 让“因子评价 -> 评分优化 -> 对照实验”形成标准工作流，而不是每次都直接改死旧 baseline。
   - 先把更强的候选评分体系以配置形式固化下来，再决定是否替代默认版本。
 
+### 32. 把 `strategy_spec_v1.md` 重构为瘦身版策略总纲
+
+- 变更内容：
+  - 删除与 `backtest_conventions`、`factor_catalog`、`experiment_guide`、`data_contracts` 等文档重复的细节规则。
+  - `strategy_spec_v1.md` 现在只保留策略版本定位、基金池范围、信号与执行定义、评分体系角色、组合定义、benchmark 定义和版本变更触发条件。
+  - 具体实现细节统一改为跳转引用专门文档。
+- 目的：
+  - 减少多份文档同时维护同一规则带来的重复、漂移和冲突。
+  - 让 `strategy_spec_v1.md` 真正承担“策略总纲”职责，而不是变成第二份细则手册。
+
 - 变更内容：
   - 新增 CLI 命令 `compare-experiments`。
   - 新增 `make compare-sample` 与 `make compare-tushare`。

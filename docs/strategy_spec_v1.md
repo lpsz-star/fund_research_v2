@@ -1,220 +1,153 @@
 # 策略规格说明 v1
 
-本文档用于满足 `AGENTS.md` 第 10 节“策略变更检查清单”的要求，明确当前默认策略口径。
+本文档只回答一个问题：
 
-## 1. 基金池定义
+- 当前仓库默认在跑的，到底是哪一版策略
 
-当前基金池范围：
+它的职责是“策略总纲”，不是字段手册、时间边界细则或实验操作手册。
+因此本文件只保留版本声明和核心策略定义，所有实现细节都跳转到专门文档。
 
-- 中国市场场外公募基金
-- 主动权益方向
-- 默认只纳入：
-  - `主动股票`
-  - `偏股混合`
-  - `灵活配置混合`
+## 1. 当前策略版本定位
 
-默认剔除：
+当前默认版本可概括为：
 
-- ETF
-- 联接基金
-- 指数基金
-- LOF
-- FOF
-- QDII
-- 名称中明显带债、货币等非权益特征的基金
-- 名称中明显带最低持有期特征的基金，例如 `一年持有`、`两年持有`、`三个月持有`
+- 资产范围：中国市场场外公募主动权益基金
+- 频率：月频
+- 研究目标：在主动权益基金池中做可审计、可复现的横截面选基
+- 当前定位：研究策略，不是实盘执行系统
 
-默认额外约束：
+这意味着：
 
-- 历史月度净值长度至少 `24` 个月
-- 基金成立至少 `12` 个月
-- 规模至少 `200` 百万元
+- 它适合做策略筛选、因子试验和实验对比
+- 不应直接被理解成“已具备真实申购执行能力的赚钱系统”
 
-## 2. 调仓频率
+## 2. 基金池定义
 
-当前默认调仓频率：
+当前默认纳入：
 
-- 月频
+- `主动股票`
+- `偏股混合`
+- `灵活配置混合`
 
-## 3. 信号生成时点
+当前默认排除：
 
-当前默认信号口径：
+- ETF / 联接 / 指数 / LOF / FOF / QDII
+- 名称中明显带债、货币特征的基金
+- 名称中明显带最低持有期特征的基金
 
-- 以 `signal_month` 所代表月份的月末信息生成信号
-- 因子只使用 `signal_month` 及之前可见的数据
-- 正式 `signal_month` 必须是 `as_of_date` 之前最后一个完整结束的自然月
+当前主线基金池更强调：
 
-例如：
+- 可见历史长度
+- 可见规模门槛
+- 流动性可接受
 
-- 若当前仍在 `2026-03` 月中，则正式最新信号月应为 `2026-02`
-- `2026-03` 在这种情况下只能作为月内观察快照，不应直接进入正式组合建议
+详细规则请看：
 
-## 4. 执行时点
+- [`data_contracts.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md)
+- [`data_dictionary.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_dictionary.md)
+- [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
 
-当前默认执行口径：
+## 3. 信号与执行定义
 
-- `signal_month` 的组合权重，在下一月 `execution_month` 生效
-- 当前把 `execution_month` 月初视为场外基金“提交申购并开始承担收益”的代理时点
-- 下一月收益作为该次调仓的实现收益
+当前默认研究口径：
 
-这一步是为了避免把同月信号与同月收益直接混用，减少前视偏差。
+- 信号基于最后一个完整自然月月末形成
+- 组合在下一月按月频代理执行口径生效
+- 回测当前仍属于研究近似，不代表真实场外基金申购确认回测
 
-需要注意：
+详细时间边界与执行解释请看：
 
-- 这里的“申购提交 / 生效”仍然只是月频研究代理口径
-- 当前系统没有真实开放申购日、暂停申购状态和确认规则，因此不能把它理解成真实成交日
+- [`backtest_conventions.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
+- [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
 
-## 5. 因子定义
+## 4. 评分体系定义
 
-当前默认三类因子如下。
+当前评分结构固定为三大类：
 
-### 5.1 收益质量 `performance_quality`
+1. `performance_quality`
+2. `risk_control`
+3. `stability_quality`
 
-由以下字段组合：
+当前仓库同时保留两类配置角色：
 
-- `ret_12m`
-- `ret_6m`
-- `excess_ret_12m`
+- 默认基线配置：
+  - [`tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
+- 候选优化配置：
+  - [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
 
-内部默认组合权重：
+当前原则是：
 
-- `ret_12m`: 50%
-- `ret_6m`: 30%
-- `excess_ret_12m`: 20%
+- 新因子先进入观察层
+- 因子评价通过后，再通过新配置进入候选评分体系
+- 不直接覆盖旧 baseline
 
-### 5.2 风险控制 `risk_control`
+具体因子、类内权重和事件因子缺失处理请看：
 
-由以下字段组合：
+- [`factor_catalog.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
 
-- `max_drawdown_12m`
-- `vol_12m`
-- `downside_vol_12m`
+## 5. 组合构建定义
 
-内部默认组合权重：
+当前默认组合方法：
 
-- `max_drawdown_12m`: 40%
-- `vol_12m`: 30%
-- `downside_vol_12m`: 30%
-
-### 5.3 稳定性质量 `stability_quality`
-
-由以下字段组合：
-
-- `manager_tenure_months`
-- `asset_stability_12m`
-
-内部默认组合权重：
-
-- `manager_tenure_months`: 70%
-- `asset_stability_12m`: 30%
-
-## 6. 因子预处理方式
-
-当前默认预处理为：
-
-- 按月横截面比较
-- 每个月仅在 `is_eligible=1` 的基金之间比较
-- 对每个字段按排序位置映射到 `[0, 1]`
-- 收益类字段高者得分高
-- 风险类字段低者得分高
-- `asset_stability_12m` 当前按更低波动/更稳定方向得分
-
-当前版本尚未实现：
-
-- winsorize
-- z-score 标准化
-- 分组标准化
-- 中性化
-
-因此当前版本应被看作基础研究框架，而不是最终成熟因子口径。
-
-## 7. 打分与排序方法
-
-总分 `total_score` 当前按配置权重合成：
-
-- `performance_quality`: 45%
-- `risk_control`: 35%
-- `stability_quality`: 20%
-
-总分越高，排名越靠前。
-
-## 8. 组合构建方法
-
-当前默认组合构建方法：
-
-- 取最新月评分结果
-- 按总分从高到低选择基金
-- 使用等权法分配初始权重
+- 基于正式最新研究月评分结果
+- 按总分排序选前 `N`
+- 等权
 - 控制单基金权重上限
-- 控制单基金公司最多入选数量
+- 控制单公司入选数量上限
 
-当前不是优化器法，不做：
+当前不是优化器策略，不做：
 
 - 均值方差优化
 - 风险平价
 - Black-Litterman
 
-## 9. 风险约束
+组合与回测细则请看：
 
-当前显式约束：
+- [`backtest_conventions.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
+- [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
 
-- 单基金权重上限：`single_fund_cap`
-- 单基金公司入选数量上限：`single_company_max`
+## 6. Benchmark 定义
 
-当前尚未实现的约束：
+当前 benchmark 已不是单一序列，而是：
 
-- 基金经理暴露约束
-- 风格暴露约束
-- 行业主题暴露约束
-- 容量约束
+- 按基金类型映射到不同指数
+- 回测中按组合持仓聚合为动态混合 benchmark
 
-## 10. 成本假设
+详细口径请看：
 
-当前默认交易成本：
+- [`factor_catalog.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
+- [`backtest_conventions.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
 
-- 固定 `transaction_cost_bps`
-- 成本按换手比例收取
+## 7. 当前版本不覆盖什么
 
-当前未纳入：
+当前版本尚未覆盖：
 
-- 申购赎回费差异
-- 暂停申赎约束
-- 大额申购/赎回限制
+- 真实场外基金申购确认建模
+- 暂停申购 / 赎回约束
+- 大额申购限制
+- 更完整的实盘风控与交易编排
+- 复杂组合优化
 
-## 11. Benchmark
+这些不属于“文档漏写”，而是当前版本明确还没做。
 
-当前默认 benchmark：
+## 8. 什么时候说明策略版本变了
 
-- 配置中的 `benchmark_return_1m`
+以下任一项变化，都应视为策略版本变化：
 
-当前实现中，benchmark 只是月收益序列接口，不代表最终指数管理系统。
+- 基金池纳入/剔除规则变化
+- 信号与执行口径变化
+- 正式评分体系变化
+- benchmark 体系变化
+- 组合构建规则变化
+- 成本模型变化
 
-## 12. 评价指标
-
-当前输出：
-
-- 累计收益
-- 年化收益
-- 年化波动
-- 最大回撤
-- 胜率
-- benchmark 累计收益
-- 超额累计收益
-
-## 13. 历史结果可比性
-
-当前版本为 `v1` 基础框架，后续若修改以下内容，将影响历史结果可比性：
-
-- 基金池纳入/剔除规则
-- 因子定义
-- 因子预处理
-- 总分权重
-- 组合构建规则
-- benchmark
-- 成本模型
-
-因此后续每次相关改动，都应：
+一旦发生这些变化，应：
 
 - 新建实验配置
-- 保留旧结果
-- 在实验记录中标识版本差异
+- 保留旧 baseline
+- 用实验对比产物解释变化来源
+
+对应说明请看：
+
+- [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
+- [`changes.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
