@@ -144,6 +144,7 @@
 当前默认口径：
 
 - `signal_date` 由 `month` 所代表的月末近似表达
+- 正式研究只把 `as_of_date` 之前最后一个完整结束的自然月视为“最新有效 `month`”
 - `available_date` 当前与 `nav_date` 相同
 - 后续如引入披露滞后，应优先调整 `available_date`
 
@@ -284,6 +285,8 @@
 
 - `entity_id`
 - `month`
+- `official_research_month`
+- `research_month_status`
 - `is_eligible`
 - `ret_3m`
 - `ret_6m`
@@ -303,6 +306,8 @@
 
 - `manager_tenure_months` 优先使用 `manager_assignment_monthly` 中该月真实匹配到的 `manager_start_month` 计算。
 - 只有当月度经理映射缺失时，才回退到 `fund_entity_master.manager_start_month`。
+- `official_research_month = 1` 表示该行属于当前 `as_of_date` 下的正式最新研究月。
+- `research_month_status = official / observation_only` 用于区分正式月与月内观察月。
 
 ### 3.8 `fund_score_monthly`
 
@@ -312,6 +317,8 @@
 
 - `entity_id`
 - `month`
+- `official_research_month`
+- `research_month_status`
 - `performance_quality`
 - `risk_control`
 - `stability_quality`
@@ -344,6 +351,8 @@
 
 - `signal_month`
 - `execution_month`
+- `execution_request_date_proxy`
+- `execution_effective_date_proxy`
 - `portfolio_return_gross`
 - `portfolio_return_net`
 - `benchmark_return`
@@ -365,10 +374,16 @@
   生成信号的月份
 - `execution_month`
   组合执行对应的下一月份
+- `execution_request_date_proxy`
+  在月频研究框架下，代理“提交申购请求”的日期；当前统一取 `execution_month` 月初
+- `execution_effective_date_proxy`
+  在月频研究框架下，代理“组合开始承担收益”的日期；当前与 `execution_request_date_proxy` 相同
 
 当前默认简化为：
 
 - 月末生成信号
+- 正式最新信号月取 `as_of_date` 之前最后一个完整月
+- 次月月初按代理申购口径开始承担收益
 - 下一月获得收益
 
 ## 5. 当前代理字段说明

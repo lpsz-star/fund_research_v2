@@ -23,6 +23,14 @@ def month_end(value: str) -> str:
     return f"{year:04d}-{month:02d}-{monthrange(year, month)[1]:02d}"
 
 
+def month_start(value: str) -> str:
+    """返回某个月份对应的月初日期字符串。"""
+    # 回测目前只有月频收益，因此任何“执行日”都只能落成月内代理日，统一取月初最容易审计。
+    year = int(value[:4])
+    month = int(value[5:7])
+    return f"{year:04d}-{month:02d}-01"
+
+
 def add_months(value: str, offset: int) -> str:
     """对 YYYY-MM 月份做整数月偏移，返回偏移后的月份。"""
     month_index = month_to_int(value) + offset
@@ -32,6 +40,16 @@ def add_months(value: str, offset: int) -> str:
         year -= 1
         month = 12
     return f"{year:04d}-{month:02d}"
+
+
+def latest_completed_month(as_of_date: str) -> str:
+    """返回 as_of_date 之前最后一个完整结束的月份。"""
+    current_month = as_of_date[:7]
+    # 研究主链路默认以“完整结束的自然月”作为正式信号月。
+    # 只要 as_of_date 还没走到当月月末，就必须回退到上一个月，避免把月内快照误当成正式月末信号。
+    if as_of_date < month_end(current_month):
+        return add_months(current_month, -1)
+    return current_month
 
 
 def iter_months(start_month: str, end_month: str) -> list[str]:

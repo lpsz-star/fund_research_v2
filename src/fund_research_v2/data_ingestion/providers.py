@@ -155,6 +155,9 @@ def _cached_snapshot_matches_config(config: AppConfig, metadata: object) -> bool
         return False
     if config.data_source == "sample":
         return True
+    cached_requested_max_funds = metadata.get("requested_max_funds")
+    if cached_requested_max_funds != config.tushare.max_funds:
+        return False
     # 真实基金快照的规模口径升级后，需要主动淘汰旧缓存，否则会继续复用“代表份额规模”这一错误结果。
     if str(metadata.get("entity_asset_aggregation") or "").strip() != "sum_of_share_classes":
         return False
@@ -172,6 +175,8 @@ def _cached_snapshot_matches_config(config: AppConfig, metadata: object) -> bool
 
 class TushareDataProvider:
     """把 tushare 基金接口映射为项目内部的数据快照。"""
+
+    _force_refresh_api_names = {"fund_basic", "fund_company"}
 
     def __init__(self, config: AppConfig, token: str, project_root: Path) -> None:
         """初始化 tushare 客户端和依赖模块。"""
@@ -337,6 +342,7 @@ class TushareDataProvider:
                 "generated_at": current_timestamp(),
                 "entity_count": len(fund_entity_master),
                 "share_class_count": len(share_class_map),
+                "requested_max_funds": self.config.tushare.max_funds,
                 "ingestion_audit": {
                     "selected_share_class_count": len(fund_basic),
                     "grouped_entity_count": len(grouped_rows),
@@ -679,10 +685,12 @@ class TushareDataProvider:
         **kwargs: object,
     ) -> Any:
         """统一执行 Tushare 请求，记录耗时、失败和有限重试。"""
-        cached = self._read_api_cache(api_name, kwargs)
-        if cached is not None:
-            self._api_cache_hits[api_name] += 1
-            return cached
+        use_cache = api_name not in self._force_refresh_api_names
+        if use_cache:
+            cached = self._read_api_cache(api_name, kwargs)
+            if cached is not None:
+                self._api_cache_hits[api_name] += 1
+                return cached
         self._api_cache_misses[api_name] += 1
         attempts = self.config.tushare.request_retry_count + 1
         last_error: Exception | None = None
@@ -693,7 +701,8 @@ class TushareDataProvider:
                 result = func(**kwargs)
                 self._record_api_call(api_name, time.monotonic() - started_at, failed=False)
                 self._api_last_call_at[api_name] = time.monotonic()
-                self._write_api_cache(api_name, kwargs, result)
+                if use_cache:
+                    self._write_api_cache(api_name, kwargs, result)
                 if self.config.tushare.request_pause_ms > 0:
                     time.sleep(self.config.tushare.request_pause_ms / 1000.0)
                 return result

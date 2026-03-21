@@ -22,6 +22,7 @@ class RankingConfig:
     # 因子权重属于策略定义的一部分，必须进入实验配置而不是埋在实现细节里。
     candidate_count: int
     factor_weights: dict[str, float]
+    category_factors: dict[str, dict[str, float]]
 
 
 @dataclass(frozen=True)
@@ -156,6 +157,10 @@ def load_config(path: Path) -> AppConfig:
         ranking=RankingConfig(
             candidate_count=int(raw["ranking"]["candidate_count"]),
             factor_weights={key: float(value) for key, value in raw["ranking"]["factor_weights"].items()},
+            category_factors={
+                category: {field: float(weight) for field, weight in factors.items()}
+                for category, factors in raw["ranking"].get("category_factors", _default_ranking_category_factors()).items()
+            },
         ),
         portfolio=PortfolioConfig(
             portfolio_size=int(raw["portfolio"]["portfolio_size"]),
@@ -230,6 +235,13 @@ def _validate(config: AppConfig) -> None:
         raise ValueError("portfolio.single_fund_cap 必须位于 (0, 1]。")
     if sum(config.ranking.factor_weights.values()) <= 0:
         raise ValueError("ranking.factor_weights 总和必须大于 0。")
+    if not config.ranking.category_factors:
+        raise ValueError("ranking.category_factors 不能为空。")
+    for category, factors in config.ranking.category_factors.items():
+        if not factors:
+            raise ValueError(f"ranking.category_factors.{category} 不能为空。")
+        if sum(factors.values()) <= 0:
+            raise ValueError(f"ranking.category_factors.{category} 权重和必须大于 0。")
     for field_name, value in {
         "backtest.start_month": config.backtest.start_month,
         "backtest.end_month": config.backtest.end_month,
@@ -259,6 +271,7 @@ def to_serializable_dict(config: AppConfig) -> dict[str, Any]:
         "ranking": {
             "candidate_count": config.ranking.candidate_count,
             "factor_weights": config.ranking.factor_weights,
+            "category_factors": config.ranking.category_factors,
         },
         "portfolio": config.portfolio.__dict__,
         "backtest": config.backtest.__dict__,
@@ -314,4 +327,24 @@ def benchmark_to_serializable_dict(config: BenchmarkConfig) -> dict[str, Any]:
             for key, series in config.series.items()
         },
         "primary_type_map": config.primary_type_map,
+    }
+
+
+def _default_ranking_category_factors() -> dict[str, dict[str, float]]:
+    """返回默认评分体系，保证旧配置不写明细因子时也能按既有口径运行。"""
+    return {
+        "performance_quality": {
+            "ret_12m": 0.5,
+            "ret_6m": 0.3,
+            "excess_ret_12m": 0.2,
+        },
+        "risk_control": {
+            "max_drawdown_12m": 0.4,
+            "vol_12m": 0.3,
+            "downside_vol_12m": 0.3,
+        },
+        "stability_quality": {
+            "manager_tenure_months": 0.7,
+            "asset_stability_12m": 0.3,
+        },
     }

@@ -11,8 +11,11 @@
 具体规则：
 
 - 在 `backtest.start_month ~ backtest.end_month` 闭区间内按完整月历推进
+- 正式 `signal_month` 统一取 `as_of_date` 之前最后一个完整结束的自然月及其历史月份
 - 在 `signal_month` 末观察基金特征与评分
 - 在 `signal_month` 生成组合权重
+- 在下一月 `execution_month` 月初，把组合视为提交申购的研究代理动作
+- 当前把 `execution_month` 月初同时视为 `execution_request_date_proxy` 和 `execution_effective_date_proxy`
 - 用下一月 `execution_month` 的基金收益作为该组合的实现收益
 - 进入 `signal_month` 信号构造的数据，必须满足 `available_date <= signal_month` 月末
 
@@ -20,10 +23,13 @@
 
 - `signal_month = 2025-01`
 - `execution_month = 2025-02`
+- `execution_request_date_proxy = 2025-02-01`
+- `execution_effective_date_proxy = 2025-02-01`
 
 含义是：
 
 - 2025 年 1 月末形成选基结果
+- 2025 年 2 月初按研究代理口径提交申购并开始承担 2025 年 2 月收益
 - 2025 年 2 月收益用于评价这次选基
 
 这意味着：
@@ -31,6 +37,8 @@
 - 即使某条净值属于 `2025-01`
 - 只要它在 2025 年 1 月月末前尚未披露
 - 它也不能进入 2025-01 的基金池和特征计算
+- 即使 raw 数据里已经出现 `2025-02` 的月内记录
+- 只要 `as_of_date` 还没走到 `2025-02` 月末，它也不能成为正式最新信号月
 
 ## 3. 收益计算
 
@@ -104,6 +112,12 @@
 - 暂停申购/赎回
 - 实际申购确认日
 - 不同份额申购限制
+
+因此当前“按场外基金申购确认口径”应理解为：
+
+- 我们已经明确采用“信号月末决策、次月月初代理申购并生效”的研究语义
+- 但由于没有基金开放日、暂停申购、确认规则和日频净值，`execution_request_date_proxy` / `execution_effective_date_proxy` 仍然只是月频代理字段
+- 它们的作用是把时间边界说清楚，而不是伪装成真实成交明细
 
 当前已经部分处理：
 

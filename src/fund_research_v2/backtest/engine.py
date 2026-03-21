@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from fund_research_v2.common.config import AppConfig
-from fund_research_v2.common.date_utils import iter_months
+from fund_research_v2.common.date_utils import iter_months, month_start
 from fund_research_v2.portfolio.construction import build_portfolio
 
 
@@ -13,7 +13,7 @@ def run_backtest(
     nav_rows: list[dict[str, object]],
     benchmark_rows: list[dict[str, object]],
 ) -> list[dict[str, object]]:
-    """按“本月信号、下一月执行”口径回放历史表现。"""
+    """按“月末生成信号、次月月初申购代理执行”口径回放历史表现。"""
     scores_by_month: dict[str, list[dict[str, object]]] = defaultdict(list)
     # 回测直接使用月收益查表，是为了把时间边界固定在月频层，不在引擎里重复解释日频净值。
     nav_lookup = {(str(row["entity_id"]), str(row["month"])): float(row["return_1m"]) for row in nav_rows}
@@ -37,6 +37,11 @@ def run_backtest(
         current_scores = scores_by_month.get(current_month, [])
         portfolio = build_portfolio(config, current_scores)
         score_lookup = {str(row["entity_id"]): row for row in current_scores}
+        execution_request_date = month_start(next_month)
+        # 这里把 execution_month 月初同时作为“申请提交”和“确认生效”的代理日。
+        # 原因不是认为真实基金一定在这一天成交，而是当前只有月频收益、没有开放申购日和确认规则，
+        # 因此只能用一个显式代理日把“次月开始承担收益”写清楚，避免误读为信号月内已成交。
+        execution_effective_date = execution_request_date
         gross_return = 0.0
         benchmark_return = 0.0
         current_weights = {}
@@ -63,6 +68,8 @@ def run_backtest(
             {
                 "signal_month": current_month,
                 "execution_month": next_month,
+                "execution_request_date_proxy": execution_request_date,
+                "execution_effective_date_proxy": execution_effective_date,
                 "portfolio_return_gross": round(gross_return, 6),
                 "portfolio_return_net": round(net_return, 6),
                 "benchmark_return": round(benchmark_return, 6),

@@ -40,6 +40,18 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
             benchmark_lookup_map = _visible_benchmark_lookup_map(benchmark_rows, month, config.benchmark.default_key)
             benchmark_lookup = _benchmark_lookup_for_key(benchmark_lookup_map, benchmark_key, config.benchmark.default_key)
             benchmark_series = config.benchmark.series_for_key(benchmark_key)
+            excess_ret_3m = round(_window_total_return(returns, index, 3) - _window_total_return_from_scalar(benchmark_lookup, months, index, 3), 6)
+            excess_ret_6m = round(_window_total_return(returns, index, 6) - _window_total_return_from_scalar(benchmark_lookup, months, index, 6), 6)
+            excess_ret_12m = round(_window_total_return(returns, index, 12) - _window_total_return_from_scalar(benchmark_lookup, months, index, 12), 6)
+            monthly_excess_returns = _monthly_excess_returns(returns, months, benchmark_lookup)
+            manager_row = manager_lookup.get((entity_id, month))
+            manager_post_change_excess_delta_12m, manager_post_change_observation_months = _manager_post_change_excess_delta(
+                months=months,
+                monthly_excess_returns=monthly_excess_returns,
+                manager_start_month=_manager_start_month_for_feature(entity, manager_row),
+                current_month=month,
+                window=12,
+            )
             # 特征只用当月及历史窗口数据构造，避免把未来月份收益泄漏到当前信号。
             feature_rows.append(
                 {
@@ -51,16 +63,27 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
                     "primary_type": entity["primary_type"],
                     "benchmark_key": benchmark_key,
                     "benchmark_name": benchmark_series.name,
-                    "manager_name": _manager_name_for_month(entity, manager_lookup.get((entity_id, month))),
+                    "manager_name": _manager_name_for_month(entity, manager_row),
                     "ret_3m": _window_total_return(returns, index, 3),
                     "ret_6m": _window_total_return(returns, index, 6),
                     "ret_12m": _window_total_return(returns, index, 12),
                     # excess_ret_12m 保留 benchmark 接口，即使当前 benchmark 还是代理值，也能固定未来的字段契约。
-                    "excess_ret_12m": round(_window_total_return(returns, index, 12) - _window_total_return_from_scalar(benchmark_lookup, months, index, 12), 6),
+                    "excess_ret_3m": excess_ret_3m,
+                    "excess_ret_6m": excess_ret_6m,
+                    "excess_ret_12m": excess_ret_12m,
+                    # 一致性因子优先回答“多个窗口是否持续跑赢”，先不用幅度大小主导结果，避免单一窗口极端行情放大噪声。
+                    "excess_consistency_12m": _excess_consistency_ratio(excess_ret_3m, excess_ret_6m, excess_ret_12m),
                     "vol_12m": _window_volatility(returns, index, 12),
                     "downside_vol_12m": _window_downside_volatility(returns, index, 12),
                     "max_drawdown_12m": _window_max_drawdown(navs, index, 12),
-                    "manager_tenure_months": _manager_tenure_months(entity, month, manager_lookup.get((entity_id, month))),
+                    "drawdown_recovery_ratio_12m": _window_drawdown_recovery_ratio(navs, index, 12),
+                    "months_since_drawdown_low_12m": _window_months_since_drawdown_low(navs, index, 12),
+                    "hit_rate_12m": _window_hit_rate(returns, index, 12),
+                    "profit_loss_ratio_12m": _window_profit_loss_ratio(returns, index, 12),
+                    "worst_3m_avg_return_12m": _window_worst_average_return(returns, index, 12, 3),
+                    "manager_post_change_excess_delta_12m": manager_post_change_excess_delta_12m,
+                    "manager_post_change_observation_months": manager_post_change_observation_months,
+                    "manager_tenure_months": _manager_tenure_months(entity, month, manager_row),
                     "asset_stability_12m": _window_asset_stability(assets, index, 12),
                 }
             )
@@ -78,6 +101,14 @@ def _manager_name_for_month(entity: dict[str, object], manager_row: dict[str, ob
     if manager_row is not None and str(manager_row.get("manager_name") or "").strip():
         return str(manager_row["manager_name"])
     return str(entity.get("manager_name") or "unknown")
+
+
+def _manager_start_month_for_feature(entity: dict[str, object], manager_row: dict[str, object] | None) -> str | None:
+    """统一获取当前月应使用的经理起始月份，保证经理相关因子口径一致。"""
+    manager_start_month = _safe_month_or_none((manager_row or {}).get("manager_start_month"))
+    if manager_start_month is not None:
+        return manager_start_month
+    return _safe_month_or_none(entity.get("manager_start_month"))
 
 
 def _manager_tenure_months(entity: dict[str, object], month: str, manager_row: dict[str, object] | None = None) -> int:
@@ -128,6 +159,15 @@ def _window_total_return_from_scalar(benchmark_lookup: dict[str, float], months:
     for month in months[max(0, end_index - window + 1) : end_index + 1]:
         result *= 1 + benchmark_lookup.get(month, 0.0)
     return round(result - 1.0, 6)
+
+
+def _monthly_excess_returns(
+    returns: list[float],
+    months: list[str],
+    benchmark_lookup: dict[str, float],
+) -> list[float]:
+    """构造逐月超额收益序列，供经理前后表现切分等事件类因子复用。"""
+    return [round(fund_return - benchmark_lookup.get(month, 0.0), 6) for fund_return, month in zip(returns, months)]
 
 
 def _visible_benchmark_lookup_map(
@@ -198,6 +238,111 @@ def _window_max_drawdown(navs: list[float], end_index: int, window: int) -> floa
     return round(max_drawdown, 6)
 
 
+def _window_drawdown_recovery_ratio(navs: list[float], end_index: int, window: int) -> float:
+    """衡量最大回撤低点到当前月份的恢复比例，刻画基金从挫折中修复净值的能力。"""
+    subset = _window_slice(navs, end_index, window)
+    if len(subset) < 2:
+        return 0.0
+    peak = subset[0]
+    trough = subset[0]
+    max_drawdown = 0.0
+    for nav in subset:
+        if nav > peak:
+            peak = nav
+            trough = nav
+            continue
+        drawdown = nav / peak - 1.0
+        if drawdown < max_drawdown:
+            max_drawdown = drawdown
+            trough = nav
+    if max_drawdown >= 0 or peak <= 0 or trough <= 0:
+        return 1.0
+    total_drop = peak - trough
+    if total_drop <= 0:
+        return 1.0
+    recovered = subset[-1] - trough
+    return round(max(recovered / total_drop, 0.0), 6)
+
+
+def _window_months_since_drawdown_low(navs: list[float], end_index: int, window: int) -> int:
+    """返回距离窗口内最大回撤低点已经过去的月份数，辅助解释恢复速度因子。"""
+    subset = _window_slice(navs, end_index, window)
+    if not subset:
+        return 0
+    peak = subset[0]
+    trough_index = 0
+    max_drawdown = 0.0
+    for index, nav in enumerate(subset):
+        if nav > peak:
+            peak = nav
+            continue
+        drawdown = nav / peak - 1.0
+        if drawdown < max_drawdown:
+            max_drawdown = drawdown
+            trough_index = index
+    return len(subset) - trough_index - 1
+
+
+def _window_hit_rate(values: list[float], end_index: int, window: int) -> float:
+    """统计窗口内正收益月份占比，衡量收益路径是否连续稳定地产生正回报。"""
+    subset = _window_slice(values, end_index, window)
+    if not subset:
+        return 0.0
+    positive_count = sum(1 for value in subset if value > 0)
+    return round(positive_count / len(subset), 6)
+
+
+def _window_profit_loss_ratio(values: list[float], end_index: int, window: int) -> float:
+    """比较窗口内平均盈利月收益与平均亏损月跌幅，避免只看正收益次数却忽略亏损杀伤力。"""
+    subset = _window_slice(values, end_index, window)
+    if not subset:
+        return 0.0
+    positive_values = [value for value in subset if value > 0]
+    negative_values = [abs(value) for value in subset if value < 0]
+    if not positive_values:
+        return 0.0
+    if not negative_values:
+        return 999.0
+    average_gain = sum(positive_values) / len(positive_values)
+    average_loss = sum(negative_values) / len(negative_values)
+    if average_loss <= 0:
+        return 999.0
+    return round(average_gain / average_loss, 6)
+
+
+def _window_worst_average_return(values: list[float], end_index: int, window: int, worst_count: int) -> float:
+    """取窗口内最差若干个月收益均值，直接度量左尾亏损杀伤力而不是只看整体波动。"""
+    subset = _window_slice(values, end_index, window)
+    if not subset:
+        return 0.0
+    ordered = sorted(subset)
+    selected = ordered[: max(1, min(worst_count, len(ordered)))]
+    return round(sum(selected) / len(selected), 6)
+
+
+def _manager_post_change_excess_delta(
+    *,
+    months: list[str],
+    monthly_excess_returns: list[float],
+    manager_start_month: str | None,
+    current_month: str,
+    window: int,
+) -> tuple[float | None, int]:
+    """比较现任经理上任前后超额收益均值，衡量换经理后是否带来可见改善。"""
+    if manager_start_month is None or manager_start_month > current_month:
+        return None, 0
+    history = [(month, excess_return) for month, excess_return in zip(months, monthly_excess_returns) if month <= current_month]
+    if not history:
+        return None, 0
+    post_values = [value for month, value in history if month >= manager_start_month][-window:]
+    pre_values = [value for month, value in history if month < manager_start_month][-window:]
+    if len(post_values) < 3 or len(pre_values) < 3:
+        return None, len(post_values)
+    post_mean = sum(post_values) / len(post_values)
+    pre_mean = sum(pre_values) / len(pre_values)
+    return round(post_mean - pre_mean, 6), len(post_values)
+
+
 def _window_asset_stability(values: list[float], end_index: int, window: int) -> float:
     """用窗口内规模波动幅度刻画规模稳定性。"""
     subset = _window_slice(values, end_index, window)
@@ -205,3 +350,11 @@ def _window_asset_stability(values: list[float], end_index: int, window: int) ->
         return 0.0
     # 数值越大表示规模波动越大；后续在稳定性打分里会按“更稳定更好”的方向处理。
     return round(max(subset) / min(subset) - 1.0, 6)
+
+
+def _excess_consistency_ratio(*window_excess_returns: float) -> float:
+    """统计多个超额收益窗口中为正的占比，衡量基金是否持续跑赢基准而非只押中单一窗口。"""
+    if not window_excess_returns:
+        return 0.0
+    positive_windows = sum(1 for value in window_excess_returns if float(value) > 0)
+    return round(positive_windows / len(window_excess_returns), 6)

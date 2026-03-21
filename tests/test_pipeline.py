@@ -13,7 +13,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from fund_research_v2.backtest.engine import run_backtest
 from fund_research_v2.cli import main
 from fund_research_v2.common.config import load_config
-from fund_research_v2.common.date_utils import add_months, is_available_by_month_end, iter_months, month_end
+from fund_research_v2.common.date_utils import add_months, is_available_by_month_end, iter_months, latest_completed_month, month_end, month_start
+from fund_research_v2.common.io_utils import read_csv
 from fund_research_v2.common.workflows import compare_experiments_command, fetch_failed_command, prepare_bundle, run_experiment_command, run_portfolio_command, run_universe_command
 from fund_research_v2.data_ingestion.providers import DatasetSnapshot, load_cached_dataset
 from fund_research_v2.data_ingestion.providers import TushareDataProvider
@@ -21,6 +22,7 @@ from fund_research_v2.data_processing.fund_type_classifier import classify_fund_
 from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
 from fund_research_v2.features.feature_builder import build_feature_rows
 from fund_research_v2.portfolio.construction import build_portfolio
+from fund_research_v2.ranking.scoring_engine import score_funds
 from fund_research_v2.reporting.reports import render_universe_audit_report
 from fund_research_v2.universe.filters import build_universe
 
@@ -135,6 +137,9 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "backtest_summary.json").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_evaluation.json").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_evaluation.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_distribution.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_bucket_performance.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_correlation.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "factor_evaluation_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "portfolio_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").exists())
@@ -145,6 +150,18 @@ class PipelineTest(unittest.TestCase):
         report_text = (self._scoped_output_dir(root, "sample", "reports") / "experiment_report.md").read_text(encoding="utf-8")
         self.assertIn("Experiment Context", report_text)
         self.assertIn("Benchmark Mapping", report_text)
+        self.assertIn("- latest_month: 2026-02", report_text)
+        portfolio_snapshot = json.loads((self._scoped_output_dir(root, "sample", "result") / "portfolio_snapshot.json").read_text(encoding="utf-8"))
+        self.assertEqual(portfolio_snapshot["latest_month"], "2026-02")
+        feature_rows = read_csv(self._scoped_output_dir(root, "sample", "feature") / "fund_feature_monthly.csv")
+        score_rows = read_csv(self._scoped_output_dir(root, "sample", "result") / "fund_score_monthly.csv")
+        self.assertIn("official_research_month", feature_rows[0])
+        self.assertIn("research_month_status", feature_rows[0])
+        self.assertIn("official_research_month", score_rows[0])
+        self.assertIn("research_month_status", score_rows[0])
+        score_status = {(str(row["month"]), str(row["research_month_status"])) for row in score_rows}
+        self.assertIn(("2026-02", "official"), score_status)
+        self.assertNotIn(("2026-02", "observation_only"), score_status)
         self.assertIn("Latest Ranking Snapshot", report_text)
         self.assertIn("Time Boundary Notes", report_text)
         self.assertIn("Backtest Summary", report_text)
@@ -167,6 +184,9 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("Restricted Funds", liquidity_report)
         fetch_report = (self._scoped_output_dir(root, "sample", "reports") / "fetch_diagnostics_report.md").read_text(encoding="utf-8")
         self.assertIn("Fetch Diagnostics Report", fetch_report)
+        self.assertIn("Distribution Diagnostics", (self._scoped_output_dir(root, "sample", "reports") / "factor_evaluation_report.md").read_text(encoding="utf-8"))
+        self.assertIn("Bucket Diagnostics", (self._scoped_output_dir(root, "sample", "reports") / "factor_evaluation_report.md").read_text(encoding="utf-8"))
+        self.assertIn("High Correlation Pairs", (self._scoped_output_dir(root, "sample", "reports") / "factor_evaluation_report.md").read_text(encoding="utf-8"))
 
     def test_compare_experiments_writes_diff_artifacts(self) -> None:
         """验证最近两次实验可以被结构化比较，并输出对比报告和差异文件。"""
@@ -513,9 +533,43 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("- 满足最少历史月数后: count=1 dropped=1", report_text)
         self.assertIn("- 满足规模门槛后: count=1 dropped=0", report_text)
 
+    def test_reports_use_latest_completed_month_instead_of_incomplete_current_month(self) -> None:
+        """验证正式报告不会把尚未走完的当月误当成最新正式信号月。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_path = self._write_config(root, self._base_config(root))
+
+        run_experiment_command(config_path)
+
+        experiment_report = (self._scoped_output_dir(root, "sample", "reports") / "experiment_report.md").read_text(encoding="utf-8")
+        portfolio_report = (self._scoped_output_dir(root, "sample", "reports") / "portfolio_report.md").read_text(encoding="utf-8")
+        universe_report = (self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").read_text(encoding="utf-8")
+        portfolio_snapshot = json.loads((self._scoped_output_dir(root, "sample", "result") / "portfolio_snapshot.json").read_text(encoding="utf-8"))
+
+        self.assertIn("- latest_month: 2026-02", experiment_report)
+        self.assertIn("- latest_month: 2026-02", portfolio_report)
+        self.assertIn("- latest_month: 2026-02", universe_report)
+        self.assertEqual(portfolio_snapshot["latest_month"], "2026-02")
+
+    def test_monthly_outputs_mark_incomplete_month_as_observation_only(self) -> None:
+        """验证结果层会把未完整月显式标记为 observation_only。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_path = self._write_config(root, self._base_config(root))
+
+        run_experiment_command(config_path)
+
+        score_rows = read_csv(self._scoped_output_dir(root, "sample", "result") / "fund_score_monthly.csv")
+        feature_rows = read_csv(self._scoped_output_dir(root, "sample", "feature") / "fund_feature_monthly.csv")
+        self.assertTrue(all(str(row["research_month_status"]) == "official" for row in score_rows))
+        self.assertTrue(all(str(row["research_month_status"]) in {"official", "observation_only"} for row in feature_rows))
+
     def test_available_date_helpers_use_signal_month_end_boundary(self) -> None:
         """验证可得性判断严格以信号月月末为边界。"""
         self.assertEqual(month_end("2026-02"), "2026-02-28")
+        self.assertEqual(month_start("2026-02"), "2026-02-01")
+        self.assertEqual(latest_completed_month("2026-03-21"), "2026-02")
+        self.assertEqual(latest_completed_month("2026-03-31"), "2026-03")
         self.assertEqual(add_months("2026-01", 1), "2026-02")
         self.assertEqual(iter_months("2026-01", "2026-03"), ["2026-01", "2026-02", "2026-03"])
         self.assertTrue(is_available_by_month_end("2026-02-28", "2026-02"))
@@ -600,6 +654,156 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(sorted(month_map), ["2026-01", "2026-02"])
         self.assertAlmostEqual(float(month_map["2026-02"]["ret_3m"]), 0.0302, places=6)
 
+    def test_feature_builder_computes_drawdown_recovery_features(self) -> None:
+        """验证回撤恢复度和距低点月数只基于当月可见净值路径计算。"""
+        config = load_config(self._write_config(Path(tempfile.mkdtemp(prefix="fund-research-v2-")), self._base_config(Path(tempfile.mkdtemp(prefix="unused-")))))
+        dataset = DatasetSnapshot(
+            fund_entity_master=[
+                {
+                    "entity_id": "RECOVER",
+                    "entity_name": "修复基金",
+                    "primary_type": "主动股票",
+                    "fund_company": "测试基金",
+                    "manager_name": "经理甲",
+                    "manager_start_month": "2024-01",
+                    "inception_month": "2020-01",
+                    "latest_assets_cny_mn": 500.0,
+                    "status": "L",
+                }
+            ],
+            fund_share_class_map=[],
+            fund_nav_monthly=[
+                {"entity_id": "RECOVER", "month": "2026-01", "nav_date": "2026-01-31", "available_date": "2026-01-31", "nav": 1.0, "return_1m": 0.0, "assets_cny_mn": 500.0},
+                {"entity_id": "RECOVER", "month": "2026-02", "nav_date": "2026-02-28", "available_date": "2026-02-28", "nav": 0.8, "return_1m": -0.2, "assets_cny_mn": 480.0},
+                {"entity_id": "RECOVER", "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-03-31", "nav": 0.9, "return_1m": 0.125, "assets_cny_mn": 490.0},
+            ],
+            benchmark_monthly=[
+                {"month": "2026-01", "benchmark_return_1m": 0.0, "available_date": "2026-01-31"},
+                {"month": "2026-02", "benchmark_return_1m": 0.0, "available_date": "2026-02-28"},
+                {"month": "2026-03", "benchmark_return_1m": 0.0, "available_date": "2026-03-31"},
+            ],
+            manager_assignment_monthly=[],
+            fund_type_audit=[],
+            metadata={},
+        )
+        universe = type("UniverseLike", (), {"rows": [
+            {"entity_id": "RECOVER", "month": "2026-01", "is_eligible": 1},
+            {"entity_id": "RECOVER", "month": "2026-02", "is_eligible": 1},
+            {"entity_id": "RECOVER", "month": "2026-03", "is_eligible": 1},
+        ]})()
+
+        rows = build_feature_rows(config, dataset, universe)
+        month_map = {str(row["month"]): row for row in rows}
+
+        self.assertAlmostEqual(float(month_map["2026-03"]["drawdown_recovery_ratio_12m"]), 0.5, places=6)
+        self.assertEqual(int(month_map["2026-03"]["months_since_drawdown_low_12m"]), 1)
+
+    def test_feature_builder_computes_return_stability_features(self) -> None:
+        """验证收益稳定性因子能正确统计正收益占比与盈亏比。"""
+        config = load_config(self._write_config(Path(tempfile.mkdtemp(prefix="fund-research-v2-")), self._base_config(Path(tempfile.mkdtemp(prefix="unused-")))))
+        dataset = DatasetSnapshot(
+            fund_entity_master=[
+                {
+                    "entity_id": "STABLE",
+                    "entity_name": "稳定基金",
+                    "primary_type": "主动股票",
+                    "fund_company": "测试基金",
+                    "manager_name": "经理甲",
+                    "manager_start_month": "2024-01",
+                    "inception_month": "2020-01",
+                    "latest_assets_cny_mn": 500.0,
+                    "status": "L",
+                }
+            ],
+            fund_share_class_map=[],
+            fund_nav_monthly=[
+                {"entity_id": "STABLE", "month": "2026-01", "nav_date": "2026-01-31", "available_date": "2026-01-31", "nav": 1.10, "return_1m": 0.10, "assets_cny_mn": 500.0},
+                {"entity_id": "STABLE", "month": "2026-02", "nav_date": "2026-02-28", "available_date": "2026-02-28", "nav": 1.045, "return_1m": -0.05, "assets_cny_mn": 490.0},
+                {"entity_id": "STABLE", "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-03-31", "nav": 1.1495, "return_1m": 0.10, "assets_cny_mn": 510.0},
+            ],
+            benchmark_monthly=[
+                {"month": "2026-01", "benchmark_return_1m": 0.0, "available_date": "2026-01-31"},
+                {"month": "2026-02", "benchmark_return_1m": 0.0, "available_date": "2026-02-28"},
+                {"month": "2026-03", "benchmark_return_1m": 0.0, "available_date": "2026-03-31"},
+            ],
+            manager_assignment_monthly=[],
+            fund_type_audit=[],
+            metadata={},
+        )
+        universe = type("UniverseLike", (), {"rows": [
+            {"entity_id": "STABLE", "month": "2026-01", "is_eligible": 1},
+            {"entity_id": "STABLE", "month": "2026-02", "is_eligible": 1},
+            {"entity_id": "STABLE", "month": "2026-03", "is_eligible": 1},
+        ]})()
+
+        rows = build_feature_rows(config, dataset, universe)
+        month_map = {str(row["month"]): row for row in rows}
+
+        self.assertAlmostEqual(float(month_map["2026-03"]["hit_rate_12m"]), 0.666667, places=6)
+        self.assertAlmostEqual(float(month_map["2026-03"]["profit_loss_ratio_12m"]), 2.0, places=6)
+        self.assertAlmostEqual(float(month_map["2026-03"]["worst_3m_avg_return_12m"]), 0.05, places=6)
+
+    def test_feature_builder_computes_manager_post_change_excess_delta(self) -> None:
+        """验证经理变更前后超额收益改善因子只比较当前经理上任前后的可见月度超额收益。"""
+        config = load_config(self._write_config(Path(tempfile.mkdtemp(prefix="fund-research-v2-")), self._base_config(Path(tempfile.mkdtemp(prefix="unused-")))))
+        dataset = DatasetSnapshot(
+            fund_entity_master=[
+                {
+                    "entity_id": "TURN",
+                    "entity_name": "换帅基金",
+                    "primary_type": "主动股票",
+                    "fund_company": "测试基金",
+                    "manager_name": "新经理",
+                    "manager_start_month": "2026-04",
+                    "inception_month": "2020-01",
+                    "latest_assets_cny_mn": 500.0,
+                    "status": "L",
+                }
+            ],
+            fund_share_class_map=[],
+            fund_nav_monthly=[
+                {"entity_id": "TURN", "month": "2026-01", "nav_date": "2026-01-31", "available_date": "2026-01-31", "nav": 0.98, "return_1m": -0.02, "assets_cny_mn": 500.0},
+                {"entity_id": "TURN", "month": "2026-02", "nav_date": "2026-02-28", "available_date": "2026-02-28", "nav": 0.9604, "return_1m": -0.02, "assets_cny_mn": 500.0},
+                {"entity_id": "TURN", "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-03-31", "nav": 0.941192, "return_1m": -0.02, "assets_cny_mn": 500.0},
+                {"entity_id": "TURN", "month": "2026-04", "nav_date": "2026-04-30", "available_date": "2026-04-30", "nav": 0.969428, "return_1m": 0.03, "assets_cny_mn": 500.0},
+                {"entity_id": "TURN", "month": "2026-05", "nav_date": "2026-05-31", "available_date": "2026-05-31", "nav": 0.998511, "return_1m": 0.03, "assets_cny_mn": 500.0},
+                {"entity_id": "TURN", "month": "2026-06", "nav_date": "2026-06-30", "available_date": "2026-06-30", "nav": 1.028466, "return_1m": 0.03, "assets_cny_mn": 500.0},
+            ],
+            benchmark_monthly=[
+                {"month": "2026-01", "benchmark_return_1m": 0.0, "available_date": "2026-01-31"},
+                {"month": "2026-02", "benchmark_return_1m": 0.0, "available_date": "2026-02-28"},
+                {"month": "2026-03", "benchmark_return_1m": 0.0, "available_date": "2026-03-31"},
+                {"month": "2026-04", "benchmark_return_1m": 0.0, "available_date": "2026-04-30"},
+                {"month": "2026-05", "benchmark_return_1m": 0.0, "available_date": "2026-05-31"},
+                {"month": "2026-06", "benchmark_return_1m": 0.0, "available_date": "2026-06-30"},
+            ],
+            manager_assignment_monthly=[
+                {"entity_id": "TURN", "month": "2026-01", "manager_name": "老经理", "manager_start_month": "2025-01", "manager_end_month": "2026-03"},
+                {"entity_id": "TURN", "month": "2026-02", "manager_name": "老经理", "manager_start_month": "2025-01", "manager_end_month": "2026-03"},
+                {"entity_id": "TURN", "month": "2026-03", "manager_name": "老经理", "manager_start_month": "2025-01", "manager_end_month": "2026-03"},
+                {"entity_id": "TURN", "month": "2026-04", "manager_name": "新经理", "manager_start_month": "2026-04", "manager_end_month": ""},
+                {"entity_id": "TURN", "month": "2026-05", "manager_name": "新经理", "manager_start_month": "2026-04", "manager_end_month": ""},
+                {"entity_id": "TURN", "month": "2026-06", "manager_name": "新经理", "manager_start_month": "2026-04", "manager_end_month": ""},
+            ],
+            fund_type_audit=[],
+            metadata={},
+        )
+        universe = type("UniverseLike", (), {"rows": [
+            {"entity_id": "TURN", "month": "2026-01", "is_eligible": 1},
+            {"entity_id": "TURN", "month": "2026-02", "is_eligible": 1},
+            {"entity_id": "TURN", "month": "2026-03", "is_eligible": 1},
+            {"entity_id": "TURN", "month": "2026-04", "is_eligible": 1},
+            {"entity_id": "TURN", "month": "2026-05", "is_eligible": 1},
+            {"entity_id": "TURN", "month": "2026-06", "is_eligible": 1},
+        ]})()
+
+        rows = build_feature_rows(config, dataset, universe)
+        month_map = {str(row["month"]): row for row in rows}
+
+        self.assertAlmostEqual(float(month_map["2026-06"]["manager_post_change_excess_delta_12m"]), 0.05, places=6)
+        self.assertEqual(int(month_map["2026-06"]["manager_post_change_observation_months"]), 3)
+        self.assertIsNone(month_map["2026-04"]["manager_post_change_excess_delta_12m"])
+
     def test_feature_builder_does_not_use_future_available_benchmark(self) -> None:
         """验证超额收益只使用信号月月末前已可见的 benchmark 月收益。"""
         config = load_config(self._write_config(Path(tempfile.mkdtemp(prefix="fund-research-v2-")), self._base_config(Path(tempfile.mkdtemp(prefix="unused-")))))
@@ -640,7 +844,10 @@ class PipelineTest(unittest.TestCase):
 
         # 2026-02 的 benchmark 直到 2026-03-03 才可见，因此 2026-02 的 excess_ret_12m 只能扣掉 2026-01 的 benchmark 收益。
         self.assertAlmostEqual(float(month_map["2026-02"]["ret_12m"]), 0.0302, places=6)
+        self.assertAlmostEqual(float(month_map["2026-02"]["excess_ret_3m"]), 0.0202, places=6)
+        self.assertAlmostEqual(float(month_map["2026-02"]["excess_ret_6m"]), 0.0202, places=6)
         self.assertAlmostEqual(float(month_map["2026-02"]["excess_ret_12m"]), 0.0202, places=6)
+        self.assertAlmostEqual(float(month_map["2026-02"]["excess_consistency_12m"]), 1.0, places=6)
 
     def test_portfolio_limits_single_company_exposure(self) -> None:
         """验证组合构建会遵守单公司暴露约束，且单基金权重不超过上限。"""
@@ -670,6 +877,8 @@ class PipelineTest(unittest.TestCase):
 
         self.assertGreater(len(rows), 0)
         self.assertLess(rows[0]["signal_month"], rows[0]["execution_month"])
+        self.assertEqual(rows[0]["execution_request_date_proxy"], f"{rows[0]['execution_month']}-01")
+        self.assertEqual(rows[0]["execution_effective_date_proxy"], rows[0]["execution_request_date_proxy"])
 
     def test_backtest_uses_continuous_months_and_records_empty_portfolio_months(self) -> None:
         """验证回测按完整月历推进，即使中间月份没有评分结果也会显式写出空仓期。"""
@@ -703,6 +912,8 @@ class PipelineTest(unittest.TestCase):
 
         self.assertEqual([str(row["signal_month"]) for row in rows], ["2026-01", "2026-02"])
         self.assertEqual([str(row["execution_month"]) for row in rows], ["2026-02", "2026-03"])
+        self.assertEqual([str(row["execution_request_date_proxy"]) for row in rows], ["2026-02-01", "2026-03-01"])
+        self.assertEqual([str(row["execution_effective_date_proxy"]) for row in rows], ["2026-02-01", "2026-03-01"])
         self.assertEqual(int(rows[0]["holdings"]), 1)
         # 2026-02 没有评分结果，因此 2026-02 -> 2026-03 应明确记录为空仓期，而不是被静默跳过。
         self.assertEqual(int(rows[1]["holdings"]), 0)
@@ -710,6 +921,133 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(float(rows[1]["portfolio_return_net"]), -0.00015)
         # 从持仓变为空仓意味着发生一次卖出，因此换手不应为 0。
         self.assertEqual(float(rows[1]["turnover"]), 0.15)
+
+    def test_score_funds_respects_configured_category_factors(self) -> None:
+        """验证评分引擎会按照配置中的因子集合与权重合成分数，而不是继续写死旧口径。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config = self._base_config(root)
+        config["ranking"]["factor_weights"] = {
+            "performance_quality": 0.5,
+            "risk_control": 0.3,
+            "stability_quality": 0.2,
+        }
+        config["ranking"]["category_factors"] = {
+            "performance_quality": {"excess_ret_12m": 1.0},
+            "risk_control": {"downside_vol_12m": 1.0},
+            "stability_quality": {"manager_post_change_excess_delta_12m": 1.0},
+        }
+        app_config = load_config(self._write_config(root, config))
+        feature_rows = [
+            {
+                "entity_id": "A",
+                "month": "2026-02",
+                "is_eligible": 1,
+                "entity_name": "基金A",
+                "fund_company": "公司A",
+                "primary_type": "主动股票",
+                "benchmark_key": "broad_equity",
+                "benchmark_name": "样例基准",
+                "manager_name": "经理A",
+                "ret_12m": 0.3,
+                "ret_6m": 0.5,
+                "excess_ret_12m": 0.4,
+                "max_drawdown_12m": -0.2,
+                "vol_12m": 0.2,
+                "downside_vol_12m": 0.05,
+                "manager_tenure_months": 60,
+                "asset_stability_12m": 2.0,
+                "manager_post_change_excess_delta_12m": 0.03,
+            },
+            {
+                "entity_id": "B",
+                "month": "2026-02",
+                "is_eligible": 1,
+                "entity_name": "基金B",
+                "fund_company": "公司B",
+                "primary_type": "主动股票",
+                "benchmark_key": "broad_equity",
+                "benchmark_name": "样例基准",
+                "manager_name": "经理B",
+                "ret_12m": 0.8,
+                "ret_6m": 0.1,
+                "excess_ret_12m": 0.1,
+                "max_drawdown_12m": -0.05,
+                "vol_12m": 0.1,
+                "downside_vol_12m": 0.08,
+                "manager_tenure_months": 12,
+                "asset_stability_12m": 0.5,
+                "manager_post_change_excess_delta_12m": -0.02,
+            },
+        ]
+
+        rows = score_funds(app_config, feature_rows)
+        row_map = {str(row["entity_id"]): row for row in rows}
+
+        self.assertEqual(float(row_map["A"]["performance_quality"]), 1.0)
+        self.assertEqual(float(row_map["B"]["performance_quality"]), 0.0)
+        self.assertEqual(float(row_map["A"]["risk_control"]), 1.0)
+        self.assertEqual(float(row_map["A"]["stability_quality"]), 1.0)
+        self.assertEqual(int(row_map["A"]["rank"]), 1)
+
+    def test_score_funds_assigns_neutral_score_for_missing_event_factor(self) -> None:
+        """验证事件类因子缺失时不会把评分流程跑崩，并按中性分处理。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config = self._base_config(root)
+        config["ranking"]["category_factors"] = {
+            "performance_quality": {"excess_ret_12m": 1.0},
+            "risk_control": {"downside_vol_12m": 1.0},
+            "stability_quality": {"manager_post_change_excess_delta_12m": 1.0},
+        }
+        app_config = load_config(self._write_config(root, config))
+        feature_rows = [
+            {
+                "entity_id": "A",
+                "month": "2026-02",
+                "is_eligible": 1,
+                "entity_name": "基金A",
+                "fund_company": "公司A",
+                "primary_type": "主动股票",
+                "benchmark_key": "broad_equity",
+                "benchmark_name": "样例基准",
+                "manager_name": "经理A",
+                "ret_12m": 0.3,
+                "ret_6m": 0.3,
+                "excess_ret_12m": 0.3,
+                "max_drawdown_12m": -0.1,
+                "vol_12m": 0.1,
+                "downside_vol_12m": 0.05,
+                "manager_tenure_months": 12,
+                "asset_stability_12m": 1.0,
+                "manager_post_change_excess_delta_12m": None,
+            },
+            {
+                "entity_id": "B",
+                "month": "2026-02",
+                "is_eligible": 1,
+                "entity_name": "基金B",
+                "fund_company": "公司B",
+                "primary_type": "主动股票",
+                "benchmark_key": "broad_equity",
+                "benchmark_name": "样例基准",
+                "manager_name": "经理B",
+                "ret_12m": 0.2,
+                "ret_6m": 0.2,
+                "excess_ret_12m": 0.2,
+                "max_drawdown_12m": -0.2,
+                "vol_12m": 0.2,
+                "downside_vol_12m": 0.08,
+                "manager_tenure_months": 24,
+                "asset_stability_12m": 1.0,
+                "manager_post_change_excess_delta_12m": 0.04,
+            },
+        ]
+
+        rows = score_funds(app_config, feature_rows)
+        row_map = {str(row["entity_id"]): row for row in rows}
+
+        self.assertEqual(float(row_map["A"]["stability_quality"]), 0.5)
 
     def test_manager_tenure_uses_real_manager_start_month(self) -> None:
         """验证样例数据中的经理任期使用真实任职起始月，而不是基金成立月近似。"""
@@ -1009,6 +1347,7 @@ class PipelineTest(unittest.TestCase):
             provider._api_min_interval_seconds = {}
             provider._api_cache_hits = defaultdict(int)
             provider._api_cache_misses = defaultdict(int)
+            provider._force_refresh_api_names = {"fund_basic", "fund_company"}
             provider.pd = pd
             return provider
 
@@ -1033,6 +1372,57 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(second_func.calls, 0)
         self.assertEqual(second_provider._api_cache_hits["fund_manager"], 1)
         self.assertEqual(first_result.to_dict("records"), second_result.to_dict("records"))
+
+    def test_fund_basic_and_fund_company_force_refresh_even_if_disk_cache_exists(self) -> None:
+        """验证 fund_basic 与 fund_company 默认强制刷新，不命中旧的整表接口缓存。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        import pandas as pd
+
+        def build_provider() -> TushareDataProvider:
+            provider = object.__new__(TushareDataProvider)
+            provider.project_root = root
+            provider.config = type(
+                "ConfigLike",
+                (),
+                {
+                    "data_source": "tushare",
+                    "paths": type("PathsLike", (), {"raw_dir": Path("data/raw")})(),
+                    "tushare": type("TushareLike", (), {"request_retry_count": 0, "request_pause_ms": 0})(),
+                },
+            )()
+            provider._manager_df_cache = {}
+            provider._monthly_nav_cache = {}
+            provider._api_call_stats = defaultdict(lambda: {"calls": 0, "failures": 0, "elapsed_seconds": 0.0})
+            provider._api_error_samples = []
+            provider._api_last_call_at = {}
+            provider._api_min_interval_seconds = {}
+            provider._api_cache_hits = defaultdict(int)
+            provider._api_cache_misses = defaultdict(int)
+            provider._force_refresh_api_names = {"fund_basic", "fund_company"}
+            provider.pd = pd
+            return provider
+
+        class FuncLike:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(self, **_: object):
+                self.calls += 1
+                return pd.DataFrame([{"value": self.calls}])
+
+        first_provider = build_provider()
+        first_func = FuncLike()
+        first_provider._call_api("fund_basic", first_func)
+        self.assertEqual(first_func.calls, 1)
+        self.assertEqual(first_provider._api_cache_misses["fund_basic"], 1)
+
+        second_provider = build_provider()
+        second_func = FuncLike()
+        second_provider._call_api("fund_basic", second_func)
+        self.assertEqual(second_func.calls, 1)
+        self.assertEqual(second_provider._api_cache_hits["fund_basic"], 0)
+        self.assertEqual(second_provider._api_cache_misses["fund_basic"], 1)
 
     def test_fund_type_classifier_distinguishes_active_index_and_mixed_styles(self) -> None:
         """验证基金类型标准化规则能识别主动股票、被动指数、指数增强和灵活配置混合。"""
@@ -1089,8 +1479,8 @@ class PipelineTest(unittest.TestCase):
     def test_factor_evaluation_respects_factor_direction(self) -> None:
         """验证因子评估会按高值/低值方向解释下一月收益。"""
         feature_rows = [
-            {"entity_id": "A", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.9, "ret_6m": 0.9, "excess_ret_12m": 0.9, "max_drawdown_12m": -0.1, "vol_12m": 0.05, "downside_vol_12m": 0.03, "manager_tenure_months": 24, "asset_stability_12m": 0.1},
-            {"entity_id": "B", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.1, "ret_6m": 0.1, "excess_ret_12m": 0.1, "max_drawdown_12m": -0.3, "vol_12m": 0.2, "downside_vol_12m": 0.15, "manager_tenure_months": 6, "asset_stability_12m": 0.6},
+            {"entity_id": "A", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.9, "ret_6m": 0.9, "excess_ret_3m": 0.9, "excess_ret_6m": 0.9, "excess_ret_12m": 0.9, "excess_consistency_12m": 1.0, "max_drawdown_12m": -0.1, "drawdown_recovery_ratio_12m": 0.9, "hit_rate_12m": 0.9, "profit_loss_ratio_12m": 2.0, "worst_3m_avg_return_12m": 0.03, "manager_post_change_excess_delta_12m": 0.04, "vol_12m": 0.05, "downside_vol_12m": 0.03, "manager_tenure_months": 24, "asset_stability_12m": 0.1},
+            {"entity_id": "B", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.1, "ret_6m": 0.1, "excess_ret_3m": 0.1, "excess_ret_6m": 0.1, "excess_ret_12m": 0.1, "excess_consistency_12m": 0.0, "max_drawdown_12m": -0.3, "drawdown_recovery_ratio_12m": 0.1, "hit_rate_12m": 0.2, "profit_loss_ratio_12m": 0.5, "worst_3m_avg_return_12m": -0.08, "manager_post_change_excess_delta_12m": -0.02, "vol_12m": 0.2, "downside_vol_12m": 0.15, "manager_tenure_months": 6, "asset_stability_12m": 0.6},
         ]
         nav_rows = [
             {"entity_id": "A", "month": "2026-02", "return_1m": 0.04},
@@ -1104,19 +1494,54 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(int(row_map["vol_12m"]["direction_ok"]), 1)
         self.assertGreater(float(row_map["ret_12m"]["avg_rankic"]), 0.0)
         self.assertGreater(float(row_map["vol_12m"]["avg_rankic"]), 0.0)
+        self.assertIn("excess_consistency_12m", row_map)
+        self.assertTrue(any(str(row["factor_name"]) == "ret_12m" for row in result["distribution_rows"]))
+        self.assertTrue(any(str(row["factor_name"]) == "ret_12m" for row in result["bucket_rows"]))
+        self.assertTrue(any(str(row["factor_left"]) == "ret_12m" or str(row["factor_right"]) == "ret_12m" for row in result["correlation_rows"]))
 
     def test_factor_evaluation_skips_months_without_next_return(self) -> None:
         """验证缺少下一月收益时，因子评估会安全跳过该月而不是报错。"""
         feature_rows = [
-            {"entity_id": "A", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.2, "ret_6m": 0.2, "excess_ret_12m": 0.2, "max_drawdown_12m": -0.1, "vol_12m": 0.1, "downside_vol_12m": 0.08, "manager_tenure_months": 12, "asset_stability_12m": 0.2},
-            {"entity_id": "B", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.1, "ret_6m": 0.1, "excess_ret_12m": 0.1, "max_drawdown_12m": -0.2, "vol_12m": 0.2, "downside_vol_12m": 0.15, "manager_tenure_months": 8, "asset_stability_12m": 0.3},
+            {"entity_id": "A", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.2, "ret_6m": 0.2, "excess_ret_3m": 0.2, "excess_ret_6m": 0.2, "excess_ret_12m": 0.2, "excess_consistency_12m": 1.0, "max_drawdown_12m": -0.1, "drawdown_recovery_ratio_12m": 0.8, "hit_rate_12m": 0.8, "profit_loss_ratio_12m": 1.5, "worst_3m_avg_return_12m": 0.01, "manager_post_change_excess_delta_12m": 0.03, "vol_12m": 0.1, "downside_vol_12m": 0.08, "manager_tenure_months": 12, "asset_stability_12m": 0.2},
+            {"entity_id": "B", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.1, "ret_6m": 0.1, "excess_ret_3m": 0.1, "excess_ret_6m": 0.1, "excess_ret_12m": 0.1, "excess_consistency_12m": 0.0, "max_drawdown_12m": -0.2, "drawdown_recovery_ratio_12m": 0.2, "hit_rate_12m": 0.2, "profit_loss_ratio_12m": 0.5, "worst_3m_avg_return_12m": -0.04, "manager_post_change_excess_delta_12m": -0.01, "vol_12m": 0.2, "downside_vol_12m": 0.15, "manager_tenure_months": 8, "asset_stability_12m": 0.3},
         ]
         nav_rows: list[dict[str, object]] = []
 
         result = evaluate_factors(feature_rows, nav_rows)
 
-        self.assertEqual(int(result["summary"]["factor_count"]), 8)
+        self.assertEqual(int(result["summary"]["factor_count"]), 16)
         self.assertTrue(all(int(row["evaluation_months"]) == 0 for row in result["factor_rows"]))
+        self.assertTrue(all(int(row["bucket_evaluation_months"]) == 0 for row in result["bucket_rows"]))
+
+    def test_factor_evaluation_distribution_and_correlation_handle_constant_and_missing_values(self) -> None:
+        """验证分布、分层和相关性诊断在常数因子与缺失值下仍能稳定输出。"""
+        feature_rows = [
+            {"entity_id": "A", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.9, "ret_6m": 0.9, "excess_ret_3m": 0.9, "excess_ret_6m": 0.9, "excess_ret_12m": 0.9, "excess_consistency_12m": 1.0, "max_drawdown_12m": -0.1, "drawdown_recovery_ratio_12m": 0.9, "hit_rate_12m": 0.9, "profit_loss_ratio_12m": 2.0, "worst_3m_avg_return_12m": 0.02, "manager_post_change_excess_delta_12m": 0.04, "vol_12m": 0.1, "downside_vol_12m": 0.05, "manager_tenure_months": 12, "asset_stability_12m": 0.2},
+            {"entity_id": "B", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.7, "ret_6m": 0.7, "excess_ret_3m": 0.7, "excess_ret_6m": 0.7, "excess_ret_12m": 0.7, "excess_consistency_12m": 1.0, "max_drawdown_12m": -0.2, "drawdown_recovery_ratio_12m": 0.7, "hit_rate_12m": 0.7, "profit_loss_ratio_12m": 1.5, "worst_3m_avg_return_12m": 0.01, "manager_post_change_excess_delta_12m": 0.03, "vol_12m": 0.2, "downside_vol_12m": 0.09, "manager_tenure_months": 12, "asset_stability_12m": 0.3},
+            {"entity_id": "C", "month": "2026-01", "is_eligible": 1, "ret_12m": "", "ret_6m": 0.5, "excess_ret_3m": 0.5, "excess_ret_6m": 0.5, "excess_ret_12m": 0.5, "excess_consistency_12m": 1.0, "max_drawdown_12m": -0.3, "drawdown_recovery_ratio_12m": 0.5, "hit_rate_12m": 0.5, "profit_loss_ratio_12m": 1.0, "worst_3m_avg_return_12m": 0.0, "manager_post_change_excess_delta_12m": 0.02, "vol_12m": 0.3, "downside_vol_12m": 0.12, "manager_tenure_months": 12, "asset_stability_12m": 0.4},
+            {"entity_id": "D", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.3, "ret_6m": 0.3, "excess_ret_3m": 0.3, "excess_ret_6m": 0.3, "excess_ret_12m": 0.3, "excess_consistency_12m": 1.0, "max_drawdown_12m": -0.4, "drawdown_recovery_ratio_12m": 0.3, "hit_rate_12m": 0.3, "profit_loss_ratio_12m": 0.7, "worst_3m_avg_return_12m": -0.01, "manager_post_change_excess_delta_12m": 0.01, "vol_12m": 0.4, "downside_vol_12m": 0.18, "manager_tenure_months": 12, "asset_stability_12m": 0.5},
+            {"entity_id": "E", "month": "2026-01", "is_eligible": 1, "ret_12m": 0.1, "ret_6m": 0.1, "excess_ret_3m": 0.1, "excess_ret_6m": 0.1, "excess_ret_12m": 0.1, "excess_consistency_12m": 1.0, "max_drawdown_12m": -0.5, "drawdown_recovery_ratio_12m": 0.1, "hit_rate_12m": 0.1, "profit_loss_ratio_12m": 0.5, "worst_3m_avg_return_12m": -0.02, "manager_post_change_excess_delta_12m": 0.0, "vol_12m": 0.5, "downside_vol_12m": 0.24, "manager_tenure_months": 12, "asset_stability_12m": 0.6},
+        ]
+        nav_rows = [
+            {"entity_id": "A", "month": "2026-02", "return_1m": 0.05},
+            {"entity_id": "B", "month": "2026-02", "return_1m": 0.04},
+            {"entity_id": "C", "month": "2026-02", "return_1m": 0.03},
+            {"entity_id": "D", "month": "2026-02", "return_1m": 0.02},
+            {"entity_id": "E", "month": "2026-02", "return_1m": 0.01},
+        ]
+
+        result = evaluate_factors(feature_rows, nav_rows)
+        distribution_map = {str(row["factor_name"]): row for row in result["distribution_rows"]}
+        bucket_map = {str(row["factor_name"]): row for row in result["bucket_rows"]}
+        correlation_map = {
+            (str(row["factor_left"]), str(row["factor_right"])): row
+            for row in result["correlation_rows"]
+        }
+
+        self.assertEqual(int(distribution_map["ret_12m"]["missing_count"]), 1)
+        self.assertEqual(float(distribution_map["manager_tenure_months"]["std"]), 0.0)
+        self.assertEqual(int(bucket_map["ret_6m"]["bucket_evaluation_months"]), 1)
+        self.assertEqual(int(correlation_map[("ret_6m", "excess_ret_12m")]["high_correlation_flag"]), 1)
 
     def test_feature_builder_uses_type_mapped_benchmark(self) -> None:
         """验证不同 primary_type 会映射到不同 benchmark 序列，而不是统一扣同一条市场基准。"""

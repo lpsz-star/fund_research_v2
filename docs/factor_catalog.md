@@ -27,8 +27,13 @@
   - `偏股混合`
   - `灵活配置混合`
 - 调仓频率：月频
-- 信号时点：当月月末
+- 信号时点：最后一个完整自然月的月末
 - 执行时点：下一月
+
+注意：
+
+- 因子虽按 `month` 月频落盘，但正式研究只使用 `as_of_date` 之前最后一个完整月作为“最新信号月”
+- 尚未走完的当月若已经有部分净值或规模记录，只能用于观察，不直接进入正式组合建议
 
 相关实现：
 
@@ -56,6 +61,17 @@
 - 再在类别内加权合成
 
 这样做的目的，是先固定一个可解释、可追踪、对异常值不太敏感的基础评分口径。
+
+当前评分引擎已经支持把三大类内部因子集合配置化，而不再完全写死在代码里：
+
+- 默认基线配置：[`tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
+- 候选优化配置：[`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+
+这意味着：
+
+- 新因子可以先进入观察层
+- 评分体系优化可以通过新配置做对照实验
+- 不必直接覆盖旧 baseline
 
 ## 3. 原子特征
 
@@ -226,6 +242,43 @@
 - 当前版本更强调经理持续性
 - 规模稳定性作为辅助约束，而不是主导因子
 
+## 4.4 `tushare_scoring_v2` 候选评分体系
+
+当前已落地一版候选评分体系配置，用于根据因子评价结果重构正式评分：
+
+- 配置文件：
+  - [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+
+类间权重：
+
+- `performance_quality`: `0.50`
+- `risk_control`: `0.35`
+- `stability_quality`: `0.15`
+
+类内因子：
+
+- `performance_quality`
+  - `excess_ret_12m`: `0.70`
+  - `ret_12m`: `0.30`
+- `risk_control`
+  - `downside_vol_12m`: `0.55`
+  - `worst_3m_avg_return_12m`: `0.45`
+- `stability_quality`
+  - `asset_stability_12m`: `0.70`
+  - `manager_post_change_excess_delta_12m`: `0.30`
+
+设计意图：
+
+- 收益侧减少对 `ret_6m` 的依赖，转而更强调 `excess_ret_12m`
+- 风险侧减少对 `vol_12m` 与 `max_drawdown_12m` 的直接依赖，转而更强调下行风险和极端阶段韧性
+- 稳定性侧弱化 `manager_tenure_months`，改为把经理变更事件后的表现作为弱权重试验项
+
+当前状态：
+
+- `v2` 已在真实 `tushare` 数据上完整跑通
+- 当前结果显示回测收益明显改善，但波动也明显抬升
+- 因此它应被视为“候选 baseline”，而不是已经确认的最终正式评分体系
+
 ## 5. 横截面评分口径
 
 每个月评分时，只对当月 `is_eligible = 1` 的基金进行排序。
@@ -236,6 +289,7 @@
 - 默认数值越大越好
 - 风险类字段按反向排序
 - `asset_stability_12m` 也按反向排序，因为波动越大越差
+- 若某个事件类因子在该基金上没有观测值，例如 `manager_post_change_excess_delta_12m`，当前按中性分 `0.5` 处理
 
 分位映射方式：
 

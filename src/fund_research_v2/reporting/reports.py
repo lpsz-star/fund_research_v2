@@ -4,11 +4,22 @@ from collections import Counter
 from pathlib import Path
 
 from fund_research_v2.common.config import AppConfig
+from fund_research_v2.common.date_utils import latest_completed_month
 
 
 def _latest_month_rows(score_rows: list[dict[str, object]], latest_month: str, limit: int) -> list[dict[str, object]]:
     """提取最新月前 N 名评分结果，确保不同报告使用同一排序口径。"""
     return [row for row in score_rows if str(row["month"]) == latest_month][:limit]
+
+
+def _latest_research_month(config: AppConfig, rows: list[dict[str, object]]) -> str:
+    """返回报告应展示的最新正式研究月份。"""
+    available_months = sorted({str(row.get("month", "")) for row in rows if str(row.get("month", ""))})
+    if not available_months:
+        return latest_completed_month(config.as_of_date)
+    completed_cutoff = latest_completed_month(config.as_of_date)
+    eligible_months = [month for month in available_months if month <= completed_cutoff]
+    return eligible_months[-1] if eligible_months else available_months[-1]
 
 
 def _time_boundary_notes() -> list[str]:
@@ -58,10 +69,22 @@ def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], s
     lines = ["# Backtest Report", "", "## Summary", ""]
     for key, value in summary.items():
         lines.append(f"- {key}: {value}")
+    lines.extend(
+        [
+            "",
+            "## Execution Convention",
+            "",
+            "- 当前采用场外基金申购确认的月频代理口径。",
+            "- `signal_month` 月末形成选基信号，`execution_month` 月初视为申购提交代理日。",
+            "- `execution_effective_date_proxy` 当前与 `execution_request_date_proxy` 相同，表示从该月开始承担收益；这只是研究代理口径，不代表真实确认日。",
+        ]
+    )
     lines.extend(["", "## Monthly Results", ""])
     for row in backtest_rows[:24]:
         lines.append(
-            f"- {row['execution_month']}: net={row['portfolio_return_net']}, "
+            f"- {row['execution_month']}: request_proxy={row.get('execution_request_date_proxy', '')}, "
+            f"effective_proxy={row.get('execution_effective_date_proxy', '')}, "
+            f"net={row['portfolio_return_net']}, "
             f"benchmark={row['benchmark_return']}, benchmark_mix={row.get('benchmark_mix', '')}, turnover={row['turnover']}"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,6 +95,10 @@ def render_factor_evaluation_report(path: Path, evaluation: dict[str, object]) -
     """把因子有效性评估结果写成 Markdown 报告。"""
     summary = evaluation.get("summary", {}) if isinstance(evaluation.get("summary"), dict) else {}
     factor_rows = evaluation.get("factor_rows", []) if isinstance(evaluation.get("factor_rows"), list) else []
+    distribution_rows = evaluation.get("distribution_rows", []) if isinstance(evaluation.get("distribution_rows"), list) else []
+    bucket_rows = evaluation.get("bucket_rows", []) if isinstance(evaluation.get("bucket_rows"), list) else []
+    correlation_rows = evaluation.get("correlation_rows", []) if isinstance(evaluation.get("correlation_rows"), list) else []
+    high_correlation_rows = [row for row in correlation_rows if int(row.get("high_correlation_flag", 0)) == 1]
     lines = [
         "# Factor Evaluation Report",
         "",
@@ -89,6 +116,31 @@ def render_factor_evaluation_report(path: Path, evaluation: dict[str, object]) -
             f"top_bottom_next_return={row['avg_top_bottom_next_return']} "
             f"direction_ok={row['direction_ok']}"
         )
+    lines.extend(["", "## Distribution Diagnostics", ""])
+    for row in distribution_rows:
+        lines.append(
+            f"- {row['factor_name']}: sample_count={row['sample_count']} "
+            f"missing_ratio={row['missing_ratio']} mean={row['mean']} std={row['std']} "
+            f"p10={row['p10']} p50={row['p50']} p90={row['p90']}"
+        )
+    lines.extend(["", "## Bucket Diagnostics", ""])
+    for row in bucket_rows:
+        lines.append(
+            f"- {row['factor_name']}: months={row['bucket_evaluation_months']} "
+            f"bucket1={row['bucket_1_avg_next_return']} bucket3={row['bucket_3_avg_next_return']} "
+            f"bucket5={row['bucket_5_avg_next_return']} top_bottom={row['avg_top_bottom_next_return']} "
+            f"monotonic_ratio={row['monotonic_month_ratio']}"
+        )
+    lines.extend(["", "## High Correlation Pairs", ""])
+    if high_correlation_rows:
+        for row in high_correlation_rows[:20]:
+            lines.append(
+                f"- {row['factor_left']} vs {row['factor_right']}: "
+                f"months={row['evaluation_months']} avg_spearman_corr={row['avg_spearman_corr']} "
+                f"positive_corr_ratio={row['positive_corr_ratio']}"
+            )
+    else:
+        lines.append("- none")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -319,7 +371,7 @@ def render_experiment_report(
     backtest_summary: dict[str, object],
 ) -> None:
     """把最新月评分、组合和回测摘要写成实验报告。"""
-    latest_month = max((str(row["month"]) for row in score_rows), default="n/a")
+    latest_month = _latest_research_month(config, score_rows)
     # 实验报告强调“这套配置+这份数据快照产出了什么结果”，因此先交代实验上下文，再摘要展示最新月与历史表现。
     latest_rows = _latest_month_rows(score_rows, latest_month, config.reporting.top_ranked_limit)
     month_range = dataset_metadata.get("month_range", {}) if isinstance(dataset_metadata.get("month_range"), dict) else {}
@@ -440,7 +492,7 @@ def render_universe_audit_report(
     universe_rows: list[dict[str, object]],
 ) -> None:
     """把最新月基金池漏斗和剔除原因写成审计报告。"""
-    latest_month = max((str(row["month"]) for row in universe_rows), default="n/a")
+    latest_month = _latest_research_month(config, universe_rows)
     latest_universe_rows = [row for row in universe_rows if str(row["month"]) == latest_month]
     entity_lookup = {str(row["entity_id"]): row for row in entity_rows}
     latest_entity_ids = {str(row["entity_id"]) for row in latest_universe_rows}

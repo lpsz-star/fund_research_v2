@@ -258,4 +258,26 @@
   - 新增 `fund_type_audit.csv` 与 `fund_type_audit_report.md`，把规则命中、置信度和中文解释显式落盘。
 - 影响范围：
   - 新旧版本在 `primary_type`、基金池原因码、benchmark 映射与超额收益解释上不再完全可比。
+
+## 15. 月内快照曾被误当成正式最新信号月
+
+- 发现时间：2026-03-21
+- 影响模块：
+  - [`workflows.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/workflows.py)
+  - [`reports.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/reporting/reports.py)
+  - 组合快照、实验报告、基金池审计报告与类型基线快照
+- 现象：
+  - 当前日期仍在月中时，系统会直接把 raw 数据中出现的最大 `month` 当成 `latest_month`。
+  - 例如在 `2026-03-21` 运行时，会把 `2026-03` 月内数据当成正式最新信号月。
+- 根因：
+  - 旧实现多个模块都直接使用 `max(row["month"])` 推导最新月。
+  - 系统没有统一定义“正式研究月”和“raw 快照最大月份”的区别。
+- 修复方案：
+  - 新增统一的“正式最新研究月”判断：正式最新月取 `as_of_date` 之前最后一个完整结束的自然月。
+  - 组合、实验记录、基金池审计、类型基线和报告全部改走同一套时间边界。
+  - 文档同步明确：月内数据只能视为观察快照，不能直接进入正式组合建议。
+- 影响范围：
+  - 修复前，最新组合建议、最新月基金池统计和实验报告都可能带有月内前视风险。
+  - 修复后，`latest_month` 可能小于 raw 快照中的最大 `month`，新旧实验不再完全可比。
+- 当前状态：已修复，并补充测试。
 - 当前状态：已修复，并补充测试。

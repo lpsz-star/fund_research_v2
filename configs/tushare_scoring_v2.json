@@ -12,9 +12,23 @@
   "ranking": {
     "candidate_count": 12,
     "factor_weights": {
-      "performance_quality": 0.45,
+      "performance_quality": 0.5,
       "risk_control": 0.35,
-      "stability_quality": 0.20
+      "stability_quality": 0.15
+    },
+    "category_factors": {
+      "performance_quality": {
+        "excess_ret_12m": 0.7,
+        "ret_12m": 0.3
+      },
+      "risk_control": {
+        "downside_vol_12m": 0.55,
+        "worst_3m_avg_return_12m": 0.45
+      },
+      "stability_quality": {
+        "asset_stability_12m": 0.7,
+        "manager_post_change_excess_delta_12m": 0.3
+      }
     }
   },
   "portfolio": {

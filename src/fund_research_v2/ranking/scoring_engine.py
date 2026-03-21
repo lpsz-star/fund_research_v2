@@ -5,6 +5,28 @@ from collections import defaultdict
 from fund_research_v2.common.config import AppConfig
 
 
+_FACTOR_DIRECTIONS = {
+    "ret_3m": "high",
+    "ret_6m": "high",
+    "ret_12m": "high",
+    "excess_ret_3m": "high",
+    "excess_ret_6m": "high",
+    "excess_ret_12m": "high",
+    "excess_consistency_12m": "high",
+    "vol_12m": "low",
+    "downside_vol_12m": "low",
+    "max_drawdown_12m": "high",
+    "drawdown_recovery_ratio_12m": "high",
+    "months_since_drawdown_low_12m": "high",
+    "hit_rate_12m": "high",
+    "profit_loss_ratio_12m": "high",
+    "worst_3m_avg_return_12m": "high",
+    "manager_post_change_excess_delta_12m": "high",
+    "manager_tenure_months": "high",
+    "asset_stability_12m": "low",
+}
+
+
 def score_funds(config: AppConfig, feature_rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """把月频特征转换为横截面因子分、总分和排名。"""
     grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
@@ -15,24 +37,16 @@ def score_funds(config: AppConfig, feature_rows: list[dict[str, object]]) -> lis
     scored_rows = []
     for month, rows in grouped.items():
         # 评分始终是“同月横截面比较”，这样不同市场环境下的绝对收益水平不会直接混在一起。
-        perf_map = _normalized_score_map(rows, "ret_12m", "ret_6m", "excess_ret_12m")
-        risk_map = _normalized_score_map(rows, "max_drawdown_12m", "vol_12m", "downside_vol_12m", invert=True)
-        stability_map = _normalized_score_map(rows, "manager_tenure_months", "asset_stability_12m", invert_last=True)
+        category_score_maps = {
+            category: _category_score_map(rows, factor_weights)
+            for category, factor_weights in config.ranking.category_factors.items()
+        }
         month_rows = []
         for row in rows:
             entity_id = str(row["entity_id"])
-            performance_quality = round(
-                perf_map["ret_12m"][entity_id] * 0.5 + perf_map["ret_6m"][entity_id] * 0.3 + perf_map["excess_ret_12m"][entity_id] * 0.2,
-                6,
-            )
-            risk_control = round(
-                risk_map["max_drawdown_12m"][entity_id] * 0.4 + risk_map["vol_12m"][entity_id] * 0.3 + risk_map["downside_vol_12m"][entity_id] * 0.3,
-                6,
-            )
-            stability_quality = round(
-                stability_map["manager_tenure_months"][entity_id] * 0.7 + stability_map["asset_stability_12m"][entity_id] * 0.3,
-                6,
-            )
+            performance_quality = category_score_maps["performance_quality"][entity_id]
+            risk_control = category_score_maps["risk_control"][entity_id]
+            stability_quality = category_score_maps["stability_quality"][entity_id]
             total_score = round(
                 performance_quality * config.ranking.factor_weights["performance_quality"]
                 + risk_control * config.ranking.factor_weights["risk_control"]
@@ -57,6 +71,23 @@ def score_funds(config: AppConfig, feature_rows: list[dict[str, object]]) -> lis
     return sorted(scored_rows, key=lambda item: (str(item["month"]), int(item["rank"])))
 
 
+def _category_score_map(rows: list[dict[str, object]], factor_weights: dict[str, float]) -> dict[str, float]:
+    """按配置中的因子集合与权重合成某一评分大类的横截面分数。"""
+    normalized_maps = {
+        field: _normalized_single_field_map(rows, field, _FACTOR_DIRECTIONS.get(field, "high"))
+        for field in factor_weights
+    }
+    weight_sum = sum(factor_weights.values())
+    result: dict[str, float] = {}
+    for row in rows:
+        entity_id = str(row["entity_id"])
+        result[entity_id] = round(
+            sum(normalized_maps[field][entity_id] * weight for field, weight in factor_weights.items()) / weight_sum,
+            6,
+        )
+    return result
+
+
 def _normalized_score_map(
     rows: list[dict[str, object]],
     *fields: str,
@@ -77,4 +108,29 @@ def _normalized_score_map(
             entity_id: round((size - index) / size, 6) if len(ordered) > 1 else 1.0
             for index, (entity_id, _) in enumerate(ordered)
         }
+    return result
+
+
+def _normalized_single_field_map(rows: list[dict[str, object]], field: str, direction: str) -> dict[str, float]:
+    """把单个字段按方向映射到 0 到 1 的横截面分位得分。"""
+    values: dict[str, float] = {}
+    missing_entity_ids: list[str] = []
+    for row in rows:
+        entity_id = str(row["entity_id"])
+        raw_value = row.get(field)
+        if raw_value is None or raw_value == "":
+            missing_entity_ids.append(entity_id)
+            continue
+        values[entity_id] = float(raw_value)
+    if not values:
+        return {str(row["entity_id"]): 0.5 for row in rows}
+    ordered = sorted(values.items(), key=lambda item: item[1], reverse=(direction == "high"))
+    size = max(len(ordered) - 1, 1)
+    result = {
+        entity_id: round((size - index) / size, 6) if len(ordered) > 1 else 1.0
+        for index, (entity_id, _) in enumerate(ordered)
+    }
+    # 事件类因子在部分基金上天然缺观测值；这里给中性分，避免“没发生事件”被机械地奖惩。
+    for entity_id in missing_entity_ids:
+        result[entity_id] = 0.5
     return result

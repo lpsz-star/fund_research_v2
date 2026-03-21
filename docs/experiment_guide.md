@@ -19,6 +19,12 @@
 - 也不是手工改 CSV 再看结果
 - 而是通过标准命令生成一套可审计产物
 
+当前还需要特别注意：
+
+- 实验报告里的 `latest_month` 指“正式最新研究月”，不是原始数据里出现的最大月份
+- 正式最新研究月统一定义为 `as_of_date` 之前最后一个完整结束的自然月
+- 若 `as_of_date` 仍处于月中，则当月数据只能用于观察，不进入正式组合建议与正式基金池审计
+
 ## 2. 标准实验入口
 
 当前标准完整实验命令：
@@ -42,6 +48,7 @@ make run-tushare
 ```bash
 PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/default.json
 PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare.json
+PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare_scoring_v2.json
 ```
 
 当前标准实验对比命令：
@@ -153,6 +160,19 @@ make run-sample
 make run-tushare
 ```
 
+如果你在做评分体系优化，建议不要直接覆盖默认 baseline，而是新增一份配置单独运行。
+
+当前仓库里已经提供了一份候选评分配置：
+
+- [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+
+它对应的运行方式是：
+
+```bash
+PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare_scoring_v2.json
+PYTHONPATH=src python3 -m fund_research_v2 compare-experiments --config configs/tushare_scoring_v2.json
+```
+
 如果上一次抓数日志显示失败集中在少量 `ts_code`，建议先执行：
 
 ```bash
@@ -184,6 +204,12 @@ make compare-tushare
 - [`portfolio_diff.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/portfolio_diff.csv)
 - [`backtest_summary_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/backtest_summary_diff.json)
 
+如果比较的是默认评分和 `tushare_scoring_v2`：
+
+- 应重点关注收益改善是否伴随波动和回撤恶化
+- 不应只看累计收益，还要同时看组合是否发生了大幅换仓
+- 若提升过大，优先怀疑是否对当前样本更敏感，而不是直接认定新体系必然更优
+
 ## 6. 实验阅读顺序建议
 
 如果你要理解一次实验结果，建议按以下顺序阅读：
@@ -195,7 +221,7 @@ make compare-tushare
 3. [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
    - 确认基金池是如何收缩的
 4. [`type_baseline_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_snapshot.json)
-   - 看基金主体、最新月基金池和最新月可投基金在各 `primary_type` 上的分布
+   - 看基金主体、正式最新月基金池和正式最新月可投基金在各 `primary_type` 上的分布
 5. [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/portfolio_report.md)
    - 看当前组合建议和未入选高分基金
 6. [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/experiment_report.md)
@@ -208,6 +234,8 @@ make compare-tushare
 - `fund_entity_master` 主要解释当前实体画像，不直接解释历史月份。
 - 历史月份的规模判断，要看 `fund_universe_monthly.visible_assets_cny_mn`。
 - 历史月份的经理解释，要看 `fund_feature_monthly.manager_name` 与 `manager_tenure_months`。
+- 报告里的 `latest_month` 默认是 `as_of_date` 之前最后一个完整月，不等于 raw 快照中的最大月份。
+- 若当前日期仍在月中，当月只可视为“月内观察快照”，不能直接当正式信号月。
 - 报告中看到的 `Time Boundary Notes` 章节，应视为阅读结果前的硬性前提。
 
 ## 7. 什么时候必须重跑 baseline

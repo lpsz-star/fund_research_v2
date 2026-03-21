@@ -13,6 +13,9 @@
 - `month`
   - 格式：`YYYY-MM`
   - 含义：月频研究索引
+  - 当前研究口径：
+    - 正式最新 `month` 取 `as_of_date` 之前最后一个完整结束的自然月
+    - 尚未走完的当月即使已有部分记录，也只能视为观察快照
 - `nav_date`
   - 格式：`YYYY-MM-DD`
   - 含义：净值所属日期
@@ -360,6 +363,15 @@
   - 含义：基金实体 ID
 - `month`
   - 含义：信号月份
+- `official_research_month`
+  - 类型：`0/1`
+  - 含义：该行是否属于当前 `as_of_date` 下的正式最新研究月
+- `research_month_status`
+  - 类型：字符串
+  - 含义：研究月份状态
+  - 当前值：
+    - `official`
+    - `observation_only`
 - `is_eligible`
   - 类型：`0/1`
   - 含义：该月是否在基金池内
@@ -441,6 +453,11 @@
 
 - `entity_id`
 - `month`
+- `official_research_month`
+  - `1` 表示该行属于当前配置下的正式最新研究月
+- `research_month_status`
+  - `official` 表示正式研究月
+  - `observation_only` 表示尚未走完整月、只保留作观察的月份
 - `performance_quality`
   - 收益质量因子分
 - `risk_control`
@@ -481,6 +498,10 @@
   - 生成组合信号的月份
 - `execution_month`
   - 实际持有收益归属的月份
+- `execution_request_date_proxy`
+  - 月频研究中的代理申购提交日，当前统一取 `execution_month` 月初
+- `execution_effective_date_proxy`
+  - 月频研究中的代理生效日，当前与 `execution_request_date_proxy` 相同
 - `portfolio_return_gross`
   - 扣成本前组合收益
 - `portfolio_return_net`
