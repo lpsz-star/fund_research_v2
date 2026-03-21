@@ -258,38 +258,6 @@
 
 ### 29. 新增实验对比与回归审计工作流
 
-### 30. 把“正式最新月”统一收敛为最后一个完整自然月
-
-- 变更内容：
-  - 在主工作流中新增统一的“正式最新研究月”判断逻辑。
-  - `portfolio`、`experiment_report`、`portfolio_report`、`universe_audit_report`、`portfolio_snapshot.json`、`type_baseline_snapshot.json` 不再直接使用 raw 数据中的最大 `month`。
-  - 当 `as_of_date` 仍处于月中时，正式最新研究月自动回退到上一个完整月。
-  - 同步更新 `README`、`experiment_guide`、`strategy_spec_v1`、`backtest_conventions`、`architecture`、`factor_catalog`、`data_contracts`、`data_dictionary`、`time_boundary_audit`。
-- 目的：
-  - 避免把尚未走完的当月月内快照误当成正式月末信号。
-  - 让组合建议、基金池审计、实验报告与回测口径在时间边界上保持一致。
-
-### 31. 把评分体系升级为“因子集合可配置”，并新增 `tushare_scoring_v2`
-
-- 变更内容：
-  - `ranking` 配置新增 `category_factors`，允许分别定义三大评分大类内部使用哪些因子以及类内权重。
-  - 评分引擎不再把三大类内部因子集合完全写死在代码里。
-  - 对事件类因子缺失值增加中性分 `0.5` 处理，避免真实数据下直接报错。
-  - 新增候选配置 [`configs/tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)。
-- 目的：
-  - 让“因子评价 -> 评分优化 -> 对照实验”形成标准工作流，而不是每次都直接改死旧 baseline。
-  - 先把更强的候选评分体系以配置形式固化下来，再决定是否替代默认版本。
-
-### 32. 把 `strategy_spec_v1.md` 重构为瘦身版策略总纲
-
-- 变更内容：
-  - 删除与 `backtest_conventions`、`factor_catalog`、`experiment_guide`、`data_contracts` 等文档重复的细节规则。
-  - `strategy_spec_v1.md` 现在只保留策略版本定位、基金池范围、信号与执行定义、评分体系角色、组合定义、benchmark 定义和版本变更触发条件。
-  - 具体实现细节统一改为跳转引用专门文档。
-- 目的：
-  - 减少多份文档同时维护同一规则带来的重复、漂移和冲突。
-  - 让 `strategy_spec_v1.md` 真正承担“策略总纲”职责，而不是变成第二份细则手册。
-
 - 变更内容：
   - 新增 CLI 命令 `compare-experiments`。
   - 新增 `make compare-sample` 与 `make compare-tushare`。
@@ -308,3 +276,35 @@
   - 基金池新增 `holding_period_restricted` 原因码，直接排除最低持有期基金。
 - 目的：
   - 当前策略明确要求场外基金月频调仓的资金流动性，因此不在回测中复杂模拟锁定期，而是在基金池前置剔除相关产品。
+
+### 31. 把“正式最新月”统一收敛为最后一个完整自然月
+
+- 变更内容：
+  - 在主工作流中新增统一的“正式最新研究月”判断逻辑。
+  - `portfolio`、`experiment_report`、`portfolio_report`、`universe_audit_report`、`portfolio_snapshot.json`、`type_baseline_snapshot.json` 不再直接使用 raw 数据中的最大 `month`。
+  - 当 `as_of_date` 仍处于月中时，正式最新研究月自动回退到上一个完整月。
+  - 同步更新 `README`、`experiment_guide`、`strategy_spec_v1`、`backtest_conventions`、`architecture`、`factor_catalog`、`data_contracts`、`data_dictionary`、`time_boundary_audit`。
+- 目的：
+  - 避免把尚未走完的当月月内快照误当成正式月末信号。
+  - 让组合建议、基金池审计、实验报告与回测口径在时间边界上保持一致。
+
+### 32. 把评分体系升级为“因子集合可配置”，并新增 `tushare_scoring_v2`
+
+- 变更内容：
+  - `ranking` 配置新增 `category_factors`，允许分别定义三大评分大类内部使用哪些因子以及类内权重。
+  - 评分引擎不再把三大类内部因子集合完全写死在代码里。
+  - 对事件类因子缺失值增加中性分 `0.5` 处理，避免真实数据下直接报错。
+  - 新增候选配置 [`configs/tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)。
+- 目的：
+  - 让“因子评价 -> 评分优化 -> 对照实验”形成标准工作流，而不是每次都直接改死旧 baseline。
+  - 先把更强的候选评分体系以配置形式固化下来，再决定是否替代默认版本。
+
+### 33. 把 `strategy_spec_v1.md` 重构为瘦身版策略总纲
+
+- 变更内容：
+  - 删除与 `backtest_conventions`、`factor_catalog`、`experiment_guide`、`data_contracts` 等文档重复的细节规则。
+  - `strategy_spec_v1.md` 现在只保留策略版本定位、基金池范围、信号与执行定义、评分体系角色、组合定义、benchmark 定义和版本变更触发条件。
+  - 具体实现细节统一改为跳转引用专门文档。
+- 目的：
+  - 减少多份文档同时维护同一规则带来的重复、漂移和冲突。
+  - 让 `strategy_spec_v1.md` 真正承担“策略总纲”职责，而不是变成第二份细则手册。
