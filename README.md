@@ -117,13 +117,16 @@
 
 - `outputs/<data_source>/reports/ingestion_audit_report.md`
 - `outputs/<data_source>/reports/fund_type_audit_report.md`
+- `outputs/<data_source>/reports/fund_liquidity_audit_report.md`
 - `outputs/<data_source>/clean/dropped_entities.csv`
 - `outputs/<data_source>/clean/fund_type_audit.csv`
+- `outputs/<data_source>/clean/fund_liquidity_audit.csv`
 
 它们专门回答两类问题：
 
 - 为什么 `fund_basic` 里看到的份额/实体，没有进入 clean 层
 - 为什么某只基金被判成 `主动股票`、`偏股混合`、`被动指数` 或 `其他`
+- 为什么某只基金因为最低持有期而被当前重视流动性的基金池排除
 
 当前 `benchmark_monthly.csv` 也已支持多条指数并行缓存：
 
@@ -142,6 +145,13 @@
 
 它不会重写整份 raw 快照，而是只根据上一次 `dataset_snapshot.json` 中记录的 `fetch_diagnostics.api_error_samples`，
 对失败的 `ts_code` 重新预热 `fund_manager` / `fund_nav` / `fund_share` 这类单接口缓存，降低下一次全量重跑的无效联网开销。
+
+当前还支持对比最近两次完整实验：
+
+- `make compare-sample`
+- `make compare-tushare`
+
+这一步的目的不是重新计算策略，而是直接回答“这次结果为什么和上次不一样”，并把配置变化、样本变化、类型基线变化、回测变化和组合变化写成标准审计产物。
 
 ## 4. 当前目录结构
 
@@ -275,6 +285,8 @@ make run-tushare
 make help
 make test
 make fetch-failed-tushare
+make compare-sample
+make compare-tushare
 make run-sample
 make run-tushare
 make portfolio-tushare

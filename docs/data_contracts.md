@@ -33,6 +33,7 @@
 - `benchmark_monthly.csv`
 - `manager_assignment_monthly.csv`
 - `fund_type_audit.csv`
+- `fund_liquidity_audit.csv`
 - `dropped_entities.csv`
 - `dataset_snapshot.json`
 
@@ -47,6 +48,7 @@
 - 月频净值表
 - benchmark 月收益表
 - 月频经理映射表
+- 基金流动性审计表
 - 月频基金池表
 
 ### 2.3 `outputs/<data_source>/feature`
@@ -218,6 +220,32 @@
 - `visible_assets_cny_mn` 是基金池规模门槛实际使用的当月可见规模
 - 审计报告解释历史月份时，应优先使用该字段，而不是 `fund_entity_master.latest_assets_cny_mn`
 - `fund_age_months` 当前保留为审计字段，不再作为默认基金池独立筛选条件
+- 若基金实体在 clean 层被识别为最低持有期产品，则会在基金池原因码中体现 `holding_period_restricted`
+
+### 3.7 `fund_liquidity_audit`
+
+基金流动性审计表。
+
+关键字段：
+
+- `entity_id`
+- `entity_name`
+- `share_class_id`
+- `fund_name`
+- `liquidity_restricted`
+- `holding_lock_months`
+- `rule_code`
+- `confidence`
+- `reason`
+
+主键：
+
+- `entity_id`
+
+说明：
+
+- 当前第一版流动性识别基于基金名称中的最低持有期关键词。
+- 本项目当前策略重视月频调仓流动性，因此识别为 `liquidity_restricted=1` 的基金会被基金池直接排除。
 
 ### 3.7 `fund_type_audit`
 

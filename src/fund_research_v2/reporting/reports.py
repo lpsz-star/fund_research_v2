@@ -186,6 +186,51 @@ def render_fund_type_audit_report(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def render_fund_liquidity_audit_report(
+    path: Path,
+    config: AppConfig,
+    dataset_metadata: dict[str, object],
+    fund_liquidity_rows: list[dict[str, object]],
+) -> None:
+    """把最低持有期识别结果写成审计报告。"""
+    summary = dataset_metadata.get("fund_liquidity_audit_summary", {}) if isinstance(dataset_metadata.get("fund_liquidity_audit_summary"), dict) else {}
+    restricted_rows = [row for row in fund_liquidity_rows if int(str(row.get("liquidity_restricted") or "0")) == 1]
+    lines = [
+        "# Fund Liquidity Audit Report",
+        "",
+        "## Audit Context",
+        "",
+        f"- as_of_date: {config.as_of_date}",
+        f"- data_source: {config.data_source}",
+        f"- audited_entity_count: {summary.get('entity_count', len(fund_liquidity_rows))}",
+        f"- restricted_entity_count: {summary.get('restricted_entity_count', len(restricted_rows))}",
+        "",
+        "## Restricted By Rule",
+        "",
+    ]
+    for rule_code, count in (summary.get("restricted_by_rule", {}) if isinstance(summary.get("restricted_by_rule"), dict) else {}).items():
+        lines.append(f"- {rule_code}: {count}")
+    lines.extend(["", "## Restricted Funds", ""])
+    for row in restricted_rows[:100]:
+        lines.append(
+            f"- {row.get('entity_name', row.get('entity_id', 'unknown'))}: "
+            f"holding_lock_months={row.get('holding_lock_months', '')} "
+            f"rule={row.get('rule_code', '')} "
+            f"confidence={row.get('confidence', '')} "
+            f"reason={row.get('reason', '')}"
+        )
+    lines.extend(["", "## Sample Rows", ""])
+    for row in fund_liquidity_rows[:50]:
+        lines.append(
+            f"- {row.get('entity_name', row.get('entity_id', 'unknown'))}: "
+            f"liquidity_restricted={row.get('liquidity_restricted', '')} "
+            f"holding_lock_months={row.get('holding_lock_months', '')} "
+            f"rule={row.get('rule_code', '')}"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def render_fetch_diagnostics_report(path: Path, dataset_metadata: dict[str, object]) -> None:
     """把抓数过程中的接口耗时、失败和错误样本写成诊断报告。"""
     diagnostics = dataset_metadata.get("fetch_diagnostics", {}) if isinstance(dataset_metadata.get("fetch_diagnostics"), dict) else {}
@@ -398,6 +443,8 @@ def render_universe_audit_report(
     latest_month = max((str(row["month"]) for row in universe_rows), default="n/a")
     latest_universe_rows = [row for row in universe_rows if str(row["month"]) == latest_month]
     entity_lookup = {str(row["entity_id"]): row for row in entity_rows}
+    latest_entity_ids = {str(row["entity_id"]) for row in latest_universe_rows}
+    latest_reason_map = _latest_reason_map(latest_universe_rows)
     current_ids = [str(row["entity_id"]) for row in entity_rows]
     eligible_rows = [row for row in latest_universe_rows if int(row["is_eligible"]) == 1]
     reason_counter: Counter[str] = Counter()
@@ -430,12 +477,21 @@ def render_universe_audit_report(
         if not any(keyword in str(entity_lookup[entity_id]["entity_name"]) for keyword in config.universe.exclude_name_keywords)
     ]
     funnel_rows.append(("剔除名称关键词后", filtered_by_name))
+    filtered_by_liquidity = [
+        entity_id for entity_id in funnel_rows[-1][1]
+        if int(str(entity_lookup[entity_id].get("liquidity_restricted") or "0")) != 1
+    ]
+    funnel_rows.append(("剔除最低持有期后", filtered_by_liquidity))
     filtered_by_history = [
-        entity_id for entity_id in funnel_rows[-1][1] if "insufficient_history" not in str(_latest_reason_map(latest_universe_rows).get(entity_id, "")).split("|")
+        entity_id
+        for entity_id in funnel_rows[-1][1]
+        if entity_id in latest_entity_ids and "insufficient_history" not in str(latest_reason_map.get(entity_id, "")).split("|")
     ]
     funnel_rows.append(("满足最少历史月数后", filtered_by_history))
     filtered_by_assets = [
-        entity_id for entity_id in funnel_rows[-1][1] if "assets_below_threshold" not in str(_latest_reason_map(latest_universe_rows).get(entity_id, "")).split("|")
+        entity_id
+        for entity_id in funnel_rows[-1][1]
+        if entity_id in latest_entity_ids and "assets_below_threshold" not in str(latest_reason_map.get(entity_id, "")).split("|")
     ]
     funnel_rows.append(("满足规模门槛后", filtered_by_assets))
 

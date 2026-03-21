@@ -11,6 +11,8 @@ help:
 	"  make fetch-sample         生成 sample 原始数据缓存" \
 	"  make fetch-tushare        拉取 tushare 原始数据缓存" \
 	"  make fetch-failed-tushare 仅重抓上次失败的 tushare 份额接口缓存" \
+	"  make compare-sample       对比 sample 最近两次完整实验" \
+	"  make compare-tushare      对比 tushare 最近两次完整实验" \
 	"  make universe-sample      构建 sample 基金池" \
 	"  make universe-tushare     构建 tushare 基金池" \
 	"  make features-sample      计算 sample 特征" \
@@ -41,6 +43,14 @@ fetch-tushare:
 .PHONY: fetch-failed-tushare
 fetch-failed-tushare:
 	$(PYTHON) $(APP) fetch-failed --config $(TUSHARE_CONFIG)
+
+.PHONY: compare-sample
+compare-sample:
+	$(PYTHON) $(APP) compare-experiments --config $(SAMPLE_CONFIG)
+
+.PHONY: compare-tushare
+compare-tushare:
+	$(PYTHON) $(APP) compare-experiments --config $(TUSHARE_CONFIG)
 
 .PHONY: universe-sample
 universe-sample:

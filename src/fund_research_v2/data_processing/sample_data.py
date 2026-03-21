@@ -3,6 +3,7 @@ from __future__ import annotations
 from fund_research_v2.common.config import BenchmarkConfig, benchmark_to_serializable_dict
 from fund_research_v2.common.contracts import DatasetSnapshot
 from fund_research_v2.common.date_utils import current_timestamp
+from fund_research_v2.data_processing.fund_liquidity_classifier import classify_fund_liquidity
 from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
 
 
@@ -16,7 +17,7 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
         ("E003", "均衡精选", "灵活配置混合", "启明基金", "经理丙", "2018-05", "2018-05", 620.0, 0.011),
         ("E004", "制造先锋", "主动股票", "启明基金", "经理丁", "2021-06", "2024-01", 480.0, 0.016),
         ("E005", "红利低波", "偏股混合", "星河基金", "经理戊", "2017-11", "2026-12", 680.0, 0.010),
-        ("E006", "行业轮动", "主动股票", "海岳基金", "经理己", "2021-11", "", 260.0, 0.008),
+        ("E006", "行业轮动一年持有", "主动股票", "海岳基金", "经理己", "2021-11", "", 260.0, 0.008),
         ("E007", "新锐成长", "主动股票", "海岳基金", "经理庚", "2025-08", "2025-08", 0.0, 0.020),
     ]
     fund_entity_master = []
@@ -25,6 +26,7 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
     benchmark_rows = []
     manager_rows = []
     fund_type_audit_rows = []
+    fund_liquidity_audit_rows = []
     for entity_id, entity_name, primary_type, company, manager, inception_month, manager_start_month, assets, drift in entities:
         classification = classify_fund_type(
             fund_type=primary_type,
@@ -32,6 +34,7 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
             fund_name=entity_name,
             benchmark_text="",
         )
+        liquidity = classify_fund_liquidity(entity_name)
         fund_entity_master.append(
             {
                 "entity_id": entity_id,
@@ -42,6 +45,8 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
                 "manager_start_month": manager_start_month,
                 "inception_month": inception_month,
                 "latest_assets_cny_mn": assets,
+                "liquidity_restricted": int(liquidity["liquidity_restricted"]),
+                "holding_lock_months": int(liquidity["holding_lock_months"]),
                 "status": "L",
             }
         )
@@ -58,6 +63,19 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
                 "rule_code": classification["rule_code"],
                 "confidence": classification["confidence"],
                 "reason": classification["reason"],
+            }
+        )
+        fund_liquidity_audit_rows.append(
+            {
+                "entity_id": entity_id,
+                "entity_name": entity_name,
+                "share_class_id": f"{entity_id}A",
+                "fund_name": entity_name,
+                "liquidity_restricted": int(liquidity["liquidity_restricted"]),
+                "holding_lock_months": int(liquidity["holding_lock_months"]),
+                "rule_code": str(liquidity["rule_code"]),
+                "confidence": str(liquidity["confidence"]),
+                "reason": str(liquidity["reason"]),
             }
         )
         share_class_map.extend(
@@ -135,6 +153,7 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
         benchmark_monthly=benchmark_rows,
         manager_assignment_monthly=manager_rows,
         fund_type_audit=fund_type_audit_rows,
+        fund_liquidity_audit=fund_liquidity_audit_rows,
         metadata={
             "source_name": "sample",
             "generated_at": current_timestamp(),
@@ -167,6 +186,14 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
                 "by_primary_type": {
                     primary_type_name: sum(1 for row in fund_type_audit_rows if row["primary_type"] == primary_type_name)
                     for primary_type_name in sorted({str(row["primary_type"]) for row in fund_type_audit_rows})
+                },
+            },
+            "fund_liquidity_audit_summary": {
+                "entity_count": len(fund_liquidity_audit_rows),
+                "restricted_entity_count": sum(int(row["liquidity_restricted"]) for row in fund_liquidity_audit_rows),
+                "restricted_by_rule": {
+                    rule_code: sum(1 for row in fund_liquidity_audit_rows if int(row["liquidity_restricted"]) == 1 and row["rule_code"] == rule_code)
+                    for rule_code in sorted({str(row["rule_code"]) for row in fund_liquidity_audit_rows if int(row["liquidity_restricted"]) == 1})
                 },
             },
         },

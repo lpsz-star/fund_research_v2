@@ -29,6 +29,9 @@ def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnaps
                 reasons.append("primary_type_excluded")
             if any(keyword in str(entity["entity_name"]) for keyword in config.universe.exclude_name_keywords):
                 reasons.append("name_keyword_excluded")
+            if int(str(entity.get("liquidity_restricted") or "0")) == 1:
+                # 当前策略优先保证月频调仓流动性，因此最低持有期基金直接在基金池层剔除，而不是在回测里复杂模拟锁定期。
+                reasons.append("holding_period_restricted")
             if current_visible_row is None:
                 reasons.append("no_available_nav_for_month")
             if visible_history_months < config.universe.min_history_months:

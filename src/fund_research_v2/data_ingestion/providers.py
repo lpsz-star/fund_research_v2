@@ -14,6 +14,7 @@ from fund_research_v2.common.config import AppConfig, benchmark_to_serializable_
 from fund_research_v2.common.contracts import DatasetSnapshot
 from fund_research_v2.common.date_utils import current_timestamp
 from fund_research_v2.common.io_utils import read_csv, read_json, write_csv, write_json
+from fund_research_v2.data_processing.fund_liquidity_classifier import classify_fund_liquidity
 from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
 from fund_research_v2.data_processing.sample_data import generate_sample_dataset
 
@@ -92,6 +93,7 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
     benchmark_path = raw_dir / "benchmark_monthly.csv"
     manager_path = raw_dir / "manager_assignment_monthly.csv"
     fund_type_audit_path = raw_dir / "fund_type_audit.csv"
+    fund_liquidity_audit_path = raw_dir / "fund_liquidity_audit.csv"
     snapshot_path = raw_dir / "dataset_snapshot.json"
     required_paths = [entity_path, share_path, nav_path, benchmark_path, manager_path, snapshot_path]
     if not all(path.exists() for path in required_paths):
@@ -103,6 +105,10 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
     entity_rows = read_csv(entity_path)
     share_rows = read_csv(share_path)
     fund_type_audit_rows = read_csv(fund_type_audit_path) if fund_type_audit_path.exists() else _build_fund_type_audit_from_entity_cache(entity_rows, share_rows)
+    fund_liquidity_audit_rows = read_csv(fund_liquidity_audit_path) if fund_liquidity_audit_path.exists() else _build_fund_liquidity_audit_from_entity_cache(entity_rows, share_rows)
+    entity_rows = _hydrate_entity_liquidity_fields(entity_rows, fund_liquidity_audit_rows)
+    if isinstance(metadata, dict) and not isinstance(metadata.get("fund_liquidity_audit_summary"), dict):
+        metadata["fund_liquidity_audit_summary"] = _build_fund_liquidity_summary(fund_liquidity_audit_rows)
     return DatasetSnapshot(
         fund_entity_master=entity_rows,
         fund_share_class_map=share_rows,
@@ -110,6 +116,7 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
         benchmark_monthly=read_csv(benchmark_path),
         manager_assignment_monthly=read_csv(manager_path),
         fund_type_audit=fund_type_audit_rows,
+        fund_liquidity_audit=fund_liquidity_audit_rows,
         metadata=metadata,
     )
 
@@ -124,6 +131,7 @@ def persist_dataset(config: AppConfig, project_root: Path, dataset: DatasetSnaps
     write_csv(raw_dir / "benchmark_monthly.csv", dataset.benchmark_monthly)
     write_csv(raw_dir / "manager_assignment_monthly.csv", dataset.manager_assignment_monthly)
     write_csv(raw_dir / "fund_type_audit.csv", dataset.fund_type_audit)
+    write_csv(raw_dir / "fund_liquidity_audit.csv", dataset.fund_liquidity_audit)
     write_json(raw_dir / "dataset_snapshot.json", dataset.metadata)
 
 
@@ -210,6 +218,7 @@ class TushareDataProvider:
         benchmark_rows: list[dict[str, object]] = []
         manager_rows: list[dict[str, object]] = []
         fund_type_audit_rows: list[dict[str, object]] = []
+        fund_liquidity_audit_rows: list[dict[str, object]] = []
         dropped_entities: list[dict[str, object]] = []
         grouped_rows = _group_share_classes(fund_basic.to_dict("records"))
         total_entities = len(grouped_rows)
@@ -221,6 +230,7 @@ class TushareDataProvider:
                 fund_name=str(representative_row.get("name") or representative_row["ts_code"]),
                 benchmark_text=str(representative_row.get("benchmark") or ""),
             )
+            liquidity = classify_fund_liquidity(str(representative_row.get("name") or representative_row["ts_code"]))
             # 后续特征和回测都以“基金实体”而不是份额类为单位，避免 A/C 份额重复入选。
             fund_company = str(representative_row.get("management") or "unknown")
             company_meta = company_lookup.get(fund_company, {})
@@ -256,6 +266,8 @@ class TushareDataProvider:
                     "manager_start_month": _normalize_month(manager_begin_date),
                     "inception_month": _normalize_month(representative_row.get("found_date") or representative_row.get("issue_date") or "20000101"),
                     "latest_assets_cny_mn": latest_assets_cny_mn,
+                    "liquidity_restricted": int(liquidity["liquidity_restricted"]),
+                    "holding_lock_months": int(liquidity["holding_lock_months"]),
                     "status": representative_row.get("status") or "L",
                     "custodian": representative_row.get("custodian") or "",
                     "benchmark_text": representative_row.get("benchmark") or "",
@@ -276,6 +288,19 @@ class TushareDataProvider:
                     "rule_code": classification["rule_code"],
                     "confidence": classification["confidence"],
                     "reason": classification["reason"],
+                }
+            )
+            fund_liquidity_audit_rows.append(
+                {
+                    "entity_id": entity_id,
+                    "entity_name": normalized_name,
+                    "share_class_id": str(representative_row["ts_code"]),
+                    "fund_name": str(representative_row.get("name") or representative_row["ts_code"]),
+                    "liquidity_restricted": int(liquidity["liquidity_restricted"]),
+                    "holding_lock_months": int(liquidity["holding_lock_months"]),
+                    "rule_code": str(liquidity["rule_code"]),
+                    "confidence": str(liquidity["confidence"]),
+                    "reason": str(liquidity["reason"]),
                 }
             )
             for row in rows:
@@ -306,6 +331,7 @@ class TushareDataProvider:
             benchmark_monthly=benchmark_rows,
             manager_assignment_monthly=manager_rows,
             fund_type_audit=fund_type_audit_rows,
+            fund_liquidity_audit=fund_liquidity_audit_rows,
             metadata={
                 "source_name": "tushare",
                 "generated_at": current_timestamp(),
@@ -351,6 +377,14 @@ class TushareDataProvider:
                     "by_confidence": {
                         confidence_name: sum(1 for row in fund_type_audit_rows if row["confidence"] == confidence_name)
                         for confidence_name in sorted({str(row["confidence"]) for row in fund_type_audit_rows})
+                    },
+                },
+                "fund_liquidity_audit_summary": {
+                    "entity_count": len(fund_liquidity_audit_rows),
+                    "restricted_entity_count": sum(int(row["liquidity_restricted"]) for row in fund_liquidity_audit_rows),
+                    "restricted_by_rule": {
+                        rule_code: sum(1 for row in fund_liquidity_audit_rows if int(row["liquidity_restricted"]) == 1 and row["rule_code"] == rule_code)
+                        for rule_code in sorted({str(row["rule_code"]) for row in fund_liquidity_audit_rows if int(row["liquidity_restricted"]) == 1})
                     },
                 },
                 "fetch_diagnostics": {
@@ -842,6 +876,70 @@ def _build_fund_type_audit_from_entity_cache(
             }
         )
     return audit_rows
+
+
+def _build_fund_liquidity_audit_from_entity_cache(
+    entity_rows: list[dict[str, object]],
+    share_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """兼容旧 raw 缓存缺少 fund_liquidity_audit.csv 的情况，从实体名称回补流动性审计表。"""
+    primary_share_lookup = {
+        str(row["entity_id"]): str(row["share_class_id"])
+        for row in share_rows
+        if int(str(row.get("is_primary_share_class") or "0")) == 1
+    }
+    audit_rows: list[dict[str, object]] = []
+    for entity in entity_rows:
+        liquidity = classify_fund_liquidity(str(entity.get("entity_name") or entity.get("entity_id") or ""))
+        audit_rows.append(
+            {
+                "entity_id": str(entity.get("entity_id") or ""),
+                "entity_name": str(entity.get("entity_name") or ""),
+                "share_class_id": primary_share_lookup.get(str(entity.get("entity_id") or ""), str(entity.get("representative_share_class_id") or "")),
+                "fund_name": str(entity.get("entity_name") or ""),
+                "liquidity_restricted": int(entity.get("liquidity_restricted") or liquidity["liquidity_restricted"]),
+                "holding_lock_months": int(entity.get("holding_lock_months") or liquidity["holding_lock_months"]),
+                "rule_code": "legacy_cache_backfill" if "liquidity_restricted" in entity else str(liquidity["rule_code"]),
+                "confidence": "low" if "liquidity_restricted" in entity else str(liquidity["confidence"]),
+                "reason": "旧 raw 缓存缺少流动性审计表，本次由实体名称规则回补，结论仅供过渡审计使用。" if "liquidity_restricted" in entity else str(liquidity["reason"]),
+            }
+        )
+    return audit_rows
+
+
+def _hydrate_entity_liquidity_fields(
+    entity_rows: list[dict[str, object]],
+    fund_liquidity_audit_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """把流动性审计结果补回实体主表，兼容旧 raw 缓存缺少相关字段的情况。"""
+    liquidity_lookup = {
+        str(row.get("entity_id") or ""): row
+        for row in fund_liquidity_audit_rows
+    }
+    hydrated_rows: list[dict[str, object]] = []
+    for entity in entity_rows:
+        hydrated = dict(entity)
+        liquidity_row = liquidity_lookup.get(str(entity.get("entity_id") or ""), {})
+        hydrated["liquidity_restricted"] = int(str(hydrated.get("liquidity_restricted") or liquidity_row.get("liquidity_restricted") or "0"))
+        hydrated["holding_lock_months"] = int(str(hydrated.get("holding_lock_months") or liquidity_row.get("holding_lock_months") or "0"))
+        hydrated_rows.append(hydrated)
+    return hydrated_rows
+
+
+def _build_fund_liquidity_summary(fund_liquidity_audit_rows: list[dict[str, object]]) -> dict[str, object]:
+    """从流动性审计表汇总 metadata 摘要，便于报告和缓存兼容复用。"""
+    return {
+        "entity_count": len(fund_liquidity_audit_rows),
+        "restricted_entity_count": sum(int(str(row.get("liquidity_restricted") or "0")) for row in fund_liquidity_audit_rows),
+        "restricted_by_rule": {
+            rule_code: sum(
+                1
+                for row in fund_liquidity_audit_rows
+                if int(str(row.get("liquidity_restricted") or "0")) == 1 and str(row.get("rule_code") or "") == rule_code
+            )
+            for rule_code in sorted({str(row.get("rule_code") or "") for row in fund_liquidity_audit_rows if int(str(row.get("liquidity_restricted") or "0")) == 1})
+        },
+    }
 
 
 def _group_share_classes(rows: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:

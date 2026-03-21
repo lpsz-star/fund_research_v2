@@ -255,3 +255,24 @@
 - 目的：
   - 避免真实抓数因少量接口失败而被迫整批重来。
   - 先补齐失败接口缓存，再执行全量研究流程，降低重复联网成本并提升可观测性。
+
+### 29. 新增实验对比与回归审计工作流
+
+- 变更内容：
+  - 新增 CLI 命令 `compare-experiments`。
+  - 新增 `make compare-sample` 与 `make compare-tushare`。
+  - 输出 `comparison_report.md`、`comparison_summary.json`、`backtest_summary_diff.json`、`type_baseline_diff.json` 与 `portfolio_diff.csv`。
+  - 实验记录中新增 `portfolio_snapshot_summary`，用于稳定比较最新组合变化。
+- 目的：
+  - 让协作者直接回答“这次结果为什么和上次不一样”，而不是手工翻配置、报告和 CSV。
+  - 把配置变化、样本变化、基金类型变化、回测变化与组合变化沉淀成标准审计产物。
+
+### 30. 基金池新增最低持有期流动性过滤
+
+- 变更内容：
+  - 新增基金名称驱动的最低持有期识别规则。
+  - clean 层新增 `fund_liquidity_audit.csv`。
+  - reports 层新增 `fund_liquidity_audit_report.md`。
+  - 基金池新增 `holding_period_restricted` 原因码，直接排除最低持有期基金。
+- 目的：
+  - 当前策略明确要求场外基金月频调仓的资金流动性，因此不在回测中复杂模拟锁定期，而是在基金池前置剔除相关产品。

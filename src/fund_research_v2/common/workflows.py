@@ -9,17 +9,20 @@ from fund_research_v2.common.config import AppConfig, load_config, scope_artifac
 from fund_research_v2.common.date_utils import current_timestamp
 from fund_research_v2.common.io_utils import append_jsonl, ensure_directories, write_csv, write_json
 from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, load_dataset, warm_failed_api_cache
+from fund_research_v2.evaluation.experiment_comparator import build_experiment_comparison, load_portfolio_snapshot, read_experiment_records
 from fund_research_v2.evaluation.metrics import summarize_backtest
 from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
 from fund_research_v2.features.feature_builder import build_feature_rows
 from fund_research_v2.portfolio.construction import build_portfolio
 from fund_research_v2.ranking.scoring_engine import score_funds
+from fund_research_v2.reporting.comparison_reports import render_comparison_report
 from fund_research_v2.reporting.reports import (
     render_backtest_report,
     render_experiment_report,
     render_fetch_diagnostics_report,
     render_fetch_retry_report,
     render_factor_evaluation_report,
+    render_fund_liquidity_audit_report,
     render_fund_type_audit_report,
     render_ingestion_audit_report,
     render_portfolio_report,
@@ -47,6 +50,24 @@ def fetch_failed_command(config_path: Path) -> None:
     result_dir = artifact_dir(config, project_root, config.paths.result_dir)
     write_json(result_dir / "fetch_retry_summary.json", refresh_result)
     render_fetch_retry_report(report_dir / "fetch_retry_report.md", refresh_result)
+
+
+def compare_experiments_command(config_path: Path) -> None:
+    """比较最近两次完整实验，输出结构化差异与审计报告。"""
+    config = load_config(config_path)
+    project_root = resolve_project_root(config_path)
+    ensure_directories(all_artifact_dirs(config, project_root))
+    experiment_dir = artifact_dir(config, project_root, config.paths.experiment_dir)
+    result_dir = artifact_dir(config, project_root, config.paths.result_dir)
+    report_dir = artifact_dir(config, project_root, config.paths.report_dir)
+    records = read_experiment_records(experiment_dir / "experiment_registry.jsonl")
+    hydrated_records = _hydrate_portfolio_summary(records)
+    comparison = build_experiment_comparison(hydrated_records)
+    write_json(result_dir / "comparison_summary.json", comparison.get("summary", {}))
+    write_json(result_dir / "backtest_summary_diff.json", comparison.get("backtest_summary_diff", {}))
+    write_json(result_dir / "type_baseline_diff.json", comparison.get("type_baseline_diff", {}))
+    write_csv(result_dir / "portfolio_diff.csv", comparison.get("portfolio_diff_rows", []))
+    render_comparison_report(report_dir / "comparison_report.md", comparison)
 
 
 def run_universe_command(config_path: Path) -> None:
@@ -153,6 +174,7 @@ def write_clean_outputs(bundle: dict[str, object]) -> None:
     write_csv(clean_dir / "benchmark_monthly.csv", dataset.benchmark_monthly)
     write_csv(clean_dir / "manager_assignment_monthly.csv", dataset.manager_assignment_monthly)
     write_csv(clean_dir / "fund_type_audit.csv", dataset.fund_type_audit)
+    write_csv(clean_dir / "fund_liquidity_audit.csv", dataset.fund_liquidity_audit)
     write_csv(clean_dir / "fund_universe_monthly.csv", universe.rows)
     write_json(clean_dir / "dataset_snapshot.json", dataset.metadata)
     ingestion_audit = dataset.metadata.get("ingestion_audit", {}) if isinstance(dataset.metadata.get("ingestion_audit"), dict) else {}
@@ -266,6 +288,12 @@ def write_universe_audit_output(bundle: dict[str, object]) -> None:
         dataset_metadata=dataset.metadata,
         fund_type_rows=dataset.fund_type_audit,
     )
+    render_fund_liquidity_audit_report(
+        artifact_dir(config, project_root, config.paths.report_dir) / "fund_liquidity_audit_report.md",
+        config=config,
+        dataset_metadata=dataset.metadata,
+        fund_liquidity_rows=dataset.fund_liquidity_audit,
+    )
     render_fetch_diagnostics_report(
         artifact_dir(config, project_root, config.paths.report_dir) / "fetch_diagnostics_report.md",
         dataset_metadata=dataset.metadata,
@@ -290,6 +318,19 @@ def build_experiment_record(
         "dataset_snapshot": dataset_metadata,
         "git_commit": git_commit_hash(project_root),
         "portfolio_size": len(portfolio_rows),
+        "portfolio_snapshot_summary": {
+            "latest_month": max((str(row.get("month", "")) for row in portfolio_rows), default=config.as_of_date[:7]),
+            "portfolio": [
+                {
+                    "entity_id": str(row.get("entity_id", "")),
+                    "entity_name": str(row.get("entity_name", "")),
+                    "fund_company": str(row.get("fund_company", "")),
+                    "rank": row.get("rank", ""),
+                    "target_weight": row.get("target_weight", ""),
+                }
+                for row in portfolio_rows
+            ],
+        },
         "type_baseline": type_baseline,
         "factor_evaluation_summary": factor_evaluation.get("summary", {}),
         "backtest_summary": backtest_summary,
@@ -353,3 +394,22 @@ def git_commit_hash(project_root: Path) -> str:
     except Exception:
         return "unknown"
     return output.decode("utf-8").strip()
+
+
+def _hydrate_portfolio_summary(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    """为旧实验记录补齐组合摘要，避免共享 result 目录导致无法比较持仓。"""
+    hydrated_records: list[dict[str, object]] = []
+    for record in records:
+        hydrated = dict(record)
+        portfolio_summary = hydrated.get("portfolio_snapshot_summary")
+        if isinstance(portfolio_summary, dict) and isinstance(portfolio_summary.get("portfolio"), list):
+            hydrated_records.append(hydrated)
+            continue
+        result_dir = Path(str(hydrated.get("result_dir") or "")).expanduser()
+        snapshot = load_portfolio_snapshot(result_dir / "portfolio_snapshot.json") if str(result_dir) else {}
+        hydrated["portfolio_snapshot_summary"] = {
+            "latest_month": snapshot.get("latest_month", ""),
+            "portfolio": snapshot.get("portfolio", []) if isinstance(snapshot.get("portfolio"), list) else [],
+        }
+        hydrated_records.append(hydrated)
+    return hydrated_records

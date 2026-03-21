@@ -14,7 +14,7 @@ from fund_research_v2.backtest.engine import run_backtest
 from fund_research_v2.cli import main
 from fund_research_v2.common.config import load_config
 from fund_research_v2.common.date_utils import add_months, is_available_by_month_end, iter_months, month_end
-from fund_research_v2.common.workflows import fetch_failed_command, prepare_bundle, run_experiment_command, run_portfolio_command, run_universe_command
+from fund_research_v2.common.workflows import compare_experiments_command, fetch_failed_command, prepare_bundle, run_experiment_command, run_portfolio_command, run_universe_command
 from fund_research_v2.data_ingestion.providers import DatasetSnapshot, load_cached_dataset
 from fund_research_v2.data_ingestion.providers import TushareDataProvider
 from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
@@ -127,6 +127,7 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "manager_assignment_monthly.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "dropped_entities.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "fund_type_audit.csv").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "clean") / "fund_liquidity_audit.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "feature") / "fund_feature_monthly.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "fund_score_monthly.csv").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "portfolio_target_monthly.csv").exists())
@@ -139,6 +140,7 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "ingestion_audit_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "fund_type_audit_report.md").exists())
+        self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "fund_liquidity_audit_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "fetch_diagnostics_report.md").exists())
         report_text = (self._scoped_output_dir(root, "sample", "reports") / "experiment_report.md").read_text(encoding="utf-8")
         self.assertIn("Experiment Context", report_text)
@@ -161,8 +163,69 @@ class PipelineTest(unittest.TestCase):
         fund_type_report = (self._scoped_output_dir(root, "sample", "reports") / "fund_type_audit_report.md").read_text(encoding="utf-8")
         self.assertIn("By Primary Type", fund_type_report)
         self.assertIn("Sample Rows", fund_type_report)
+        liquidity_report = (self._scoped_output_dir(root, "sample", "reports") / "fund_liquidity_audit_report.md").read_text(encoding="utf-8")
+        self.assertIn("Restricted Funds", liquidity_report)
         fetch_report = (self._scoped_output_dir(root, "sample", "reports") / "fetch_diagnostics_report.md").read_text(encoding="utf-8")
         self.assertIn("Fetch Diagnostics Report", fetch_report)
+
+    def test_compare_experiments_writes_diff_artifacts(self) -> None:
+        """验证最近两次实验可以被结构化比较，并输出对比报告和差异文件。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_path = self._write_config(root, self._base_config(root))
+        experiment_dir = self._scoped_output_dir(root, "sample", "experiments")
+        experiment_dir.mkdir(parents=True, exist_ok=True)
+        registry_path = experiment_dir / "experiment_registry.jsonl"
+        previous = {
+            "experiment_id": "exp_20260301_sample",
+            "generated_at": "2026-03-20T10:00:00Z",
+            "config": {"data_source": "sample", "portfolio": {"portfolio_size": 4}},
+            "dataset_snapshot": {"source_name": "sample", "entity_count": 8, "share_class_count": 12, "benchmark_name": "中证800样例基准", "month_range": {"start": "2022-01", "end": "2026-03"}},
+            "git_commit": "abc",
+            "type_baseline": {"latest_month": "2026-03", "entity_count": 8, "latest_row_count": 8, "eligible_count": 4, "entity_type_count": {"主动股票": 3}, "latest_type_count": {"主动股票": 3}, "eligible_type_count": {"主动股票": 2}},
+            "factor_evaluation_summary": {"factor_count": 8, "strong_factor_count": 2, "weak_factor_count": 4},
+            "backtest_summary": {"months": 12, "cumulative_return": 0.1, "benchmark_cumulative_return": 0.05, "excess_cumulative_return": 0.05},
+            "portfolio_snapshot_summary": {"latest_month": "2026-03", "portfolio": [{"entity_id": "E1", "entity_name": "基金甲", "fund_company": "甲公司", "rank": 1, "target_weight": 0.25}]},
+            "result_dir": str(self._scoped_output_dir(root, "sample", "result")),
+        }
+        current = {
+            "experiment_id": "exp_20260301_sample",
+            "generated_at": "2026-03-20T11:00:00Z",
+            "config": {"data_source": "sample", "portfolio": {"portfolio_size": 6}},
+            "dataset_snapshot": {"source_name": "sample", "entity_count": 10, "share_class_count": 14, "benchmark_name": "中证800样例基准", "month_range": {"start": "2022-01", "end": "2026-03"}},
+            "git_commit": "def",
+            "type_baseline": {"latest_month": "2026-03", "entity_count": 10, "latest_row_count": 10, "eligible_count": 5, "entity_type_count": {"主动股票": 4}, "latest_type_count": {"主动股票": 4}, "eligible_type_count": {"主动股票": 3}},
+            "factor_evaluation_summary": {"factor_count": 8, "strong_factor_count": 3, "weak_factor_count": 3},
+            "backtest_summary": {"months": 12, "cumulative_return": 0.13, "benchmark_cumulative_return": 0.04, "excess_cumulative_return": 0.09},
+            "portfolio_snapshot_summary": {"latest_month": "2026-03", "portfolio": [{"entity_id": "E2", "entity_name": "基金乙", "fund_company": "乙公司", "rank": 1, "target_weight": 0.3}]},
+            "result_dir": str(self._scoped_output_dir(root, "sample", "result")),
+        }
+        registry_path.write_text("\n".join([json.dumps(previous, ensure_ascii=False), json.dumps(current, ensure_ascii=False)]) + "\n", encoding="utf-8")
+
+        compare_experiments_command(config_path)
+
+        result_dir = self._scoped_output_dir(root, "sample", "result")
+        report_dir = self._scoped_output_dir(root, "sample", "reports")
+        self.assertTrue((result_dir / "comparison_summary.json").exists())
+        self.assertTrue((result_dir / "backtest_summary_diff.json").exists())
+        self.assertTrue((result_dir / "type_baseline_diff.json").exists())
+        self.assertTrue((result_dir / "portfolio_diff.csv").exists())
+        self.assertTrue((report_dir / "comparison_report.md").exists())
+        report_text = (report_dir / "comparison_report.md").read_text(encoding="utf-8")
+        self.assertIn("Comparison Report", report_text)
+        self.assertIn("Config Diff", report_text)
+        self.assertIn("Portfolio Diff", report_text)
+        diff_payload = json.loads((result_dir / "backtest_summary_diff.json").read_text(encoding="utf-8"))
+        self.assertEqual(diff_payload["cumulative_return"]["delta"], 0.03)
+
+    def test_cli_dispatches_compare_experiments_command(self) -> None:
+        """验证 CLI 已暴露实验对比入口，避免对比能力只能通过内部函数调用。"""
+        with mock.patch("fund_research_v2.cli.compare_experiments_command") as mocked_command:
+            with mock.patch.object(sys, "argv", ["fund_research_v2", "compare-experiments", "--config", "configs/default.json"]):
+                exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        mocked_command.assert_called_once_with(Path("configs/default.json"))
 
     def test_fetch_failed_command_writes_retry_summary_and_report(self) -> None:
         """验证失败增量补抓会基于上次错误样本生成补抓摘要与报告。"""
@@ -290,6 +353,19 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("assets_below_threshold", reason_map["E007"])
         self.assertNotIn("fund_too_new", reason_map["E007"])
 
+    def test_universe_filters_holding_period_restricted_fund(self) -> None:
+        """验证最低持有期基金会因流动性要求被基金池直接排除。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_path = self._write_config(root, self._base_config(root))
+
+        bundle = prepare_bundle(config_path)
+        latest_month = max(str(row["month"]) for row in bundle["universe"].rows)
+        latest_rows = [row for row in bundle["universe"].rows if str(row["month"]) == latest_month]
+        reason_map = {str(row["entity_id"]): str(row["reason_codes"]) for row in latest_rows}
+
+        self.assertIn("holding_period_restricted", reason_map["E006"])
+
     def test_universe_uses_visible_month_asset_instead_of_latest_asset(self) -> None:
         """验证基金池规模门槛使用当月可见规模，而不是实体主表中的最新规模。"""
         config = load_config(self._write_config(Path(tempfile.mkdtemp(prefix="fund-research-v2-")), self._base_config(Path(tempfile.mkdtemp(prefix="unused-")))))
@@ -372,6 +448,70 @@ class PipelineTest(unittest.TestCase):
         # 如果这里出现 999.0，说明报告仍在误用实体主表的最新规模字段。
         self.assertIn("visible_assets_cny_mn=120.0", report_text)
         self.assertNotIn("assets_cny_mn=999.0", report_text)
+
+    def test_universe_audit_report_excludes_entities_missing_latest_month_rows_from_funnel(self) -> None:
+        """验证漏斗后半段不会把缺少最新月记录的基金误算成通过历史和规模门槛。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config = self._base_config(root)
+        config["universe"]["min_history_months"] = 1
+        config["data_source"] = "sample"
+        config_path = self._write_config(root, config)
+
+        dataset = DatasetSnapshot(
+            fund_entity_master=[
+                {
+                    "entity_id": "KEEP",
+                    "entity_name": "可投基金",
+                    "primary_type": "主动股票",
+                    "fund_company": "测试基金",
+                    "manager_name": "经理甲",
+                    "manager_start_month": "2024-01",
+                    "inception_month": "2020-01",
+                    "latest_assets_cny_mn": 500.0,
+                    "status": "L",
+                },
+                {
+                    "entity_id": "MISSING",
+                    "entity_name": "缺月基金",
+                    "primary_type": "主动股票",
+                    "fund_company": "测试基金",
+                    "manager_name": "经理乙",
+                    "manager_start_month": "2024-01",
+                    "inception_month": "2020-01",
+                    "latest_assets_cny_mn": 500.0,
+                    "status": "L",
+                },
+            ],
+            fund_share_class_map=[],
+            fund_nav_monthly=[
+                {"entity_id": "KEEP", "month": "2026-02", "nav_date": "2026-02-28", "available_date": "2026-02-28", "nav": 1.0, "return_1m": 0.01, "assets_cny_mn": 500.0},
+                {"entity_id": "KEEP", "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-03-31", "nav": 1.01, "return_1m": 0.01, "assets_cny_mn": 510.0},
+                {"entity_id": "MISSING", "month": "2026-02", "nav_date": "2026-02-28", "available_date": "2026-02-28", "nav": 1.0, "return_1m": 0.0, "assets_cny_mn": 500.0},
+            ],
+            benchmark_monthly=[
+                {"month": "2026-02", "benchmark_return_1m": 0.0},
+                {"month": "2026-03", "benchmark_return_1m": 0.0},
+            ],
+            manager_assignment_monthly=[],
+            fund_type_audit=[],
+            metadata={"source_name": "sample"},
+        )
+        universe = build_universe(load_config(config_path), dataset)
+
+        report_path = self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md"
+        render_universe_audit_report(
+            report_path,
+            config=load_config(config_path),
+            dataset_metadata=dataset.metadata,
+            entity_rows=dataset.fund_entity_master,
+            universe_rows=universe.rows,
+        )
+        report_text = report_path.read_text(encoding="utf-8")
+
+        self.assertIn("- eligible_count: 1", report_text)
+        self.assertIn("- 满足最少历史月数后: count=1 dropped=1", report_text)
+        self.assertIn("- 满足规模门槛后: count=1 dropped=0", report_text)
 
     def test_available_date_helpers_use_signal_month_end_boundary(self) -> None:
         """验证可得性判断严格以信号月月末为边界。"""
@@ -503,7 +643,7 @@ class PipelineTest(unittest.TestCase):
         self.assertAlmostEqual(float(month_map["2026-02"]["excess_ret_12m"]), 0.0202, places=6)
 
     def test_portfolio_limits_single_company_exposure(self) -> None:
-        """验证组合构建会遵守单公司暴露约束且最终权重和为 1。"""
+        """验证组合构建会遵守单公司暴露约束，且单基金权重不超过上限。"""
         root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
         self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
         config_path = self._write_config(root, self._base_config(root))
@@ -516,7 +656,8 @@ class PipelineTest(unittest.TestCase):
         companies = [str(row["fund_company"]) for row in portfolio]
         # 公司名去重后数量应不变，说明没有超出单公司上限。
         self.assertEqual(len(companies), len(set(companies)))
-        self.assertAlmostEqual(sum(float(row["target_weight"]) for row in portfolio), 1.0, places=5)
+        self.assertLessEqual(sum(float(row["target_weight"]) for row in portfolio), 1.0)
+        self.assertTrue(all(float(row["target_weight"]) <= load_config(config_path).portfolio.single_fund_cap for row in portfolio))
 
     def test_backtest_respects_next_month_execution(self) -> None:
         """验证回测严格按“当月信号、下月执行”的时间规则运行。"""

@@ -543,7 +543,113 @@
   - 当前目录不是 git 仓库时为 `unknown`
 - `portfolio_size`
   - 最新一期组合持仓数
+- `portfolio_snapshot_summary`
+  - 写入实验记录的最新组合摘要
+  - 目的是让后续实验对比不依赖共享 `result_dir` 中可能被覆盖的当前文件
 - `backtest_summary`
   - 回测摘要指标
 - `result_dir`
   - 本次实验结果目录
+
+## 12.1 `fund_liquidity_audit.csv`
+
+作用：
+
+- 记录基金名称中的最低持有期识别结果，服务于当前优先保留流动性的基金池口径
+
+字段说明：
+
+- `entity_id`
+  - 基金实体 ID
+- `entity_name`
+  - 基金实体名称
+- `share_class_id`
+  - 当前代表份额 ID
+- `fund_name`
+  - 原始基金名称
+- `liquidity_restricted`
+  - 是否因最低持有期被视为流动性受限
+- `holding_lock_months`
+  - 从基金名称规则提取出的最低持有月数
+- `rule_code`
+  - 命中的识别规则
+- `confidence`
+  - 当前识别置信度
+- `reason`
+  - 规则解释文本
+
+## 13. 实验对比产物
+
+### 13.1 `comparison_summary.json`
+
+作用：
+
+- 汇总最近两次实验最值得先看的差异计数
+
+字段说明：
+
+- `config_change_count`
+  - 配置差异字段数
+- `portfolio_added_count`
+  - 新进组合基金数
+- `portfolio_removed_count`
+  - 移出组合基金数
+- `portfolio_reweighted_count`
+  - 仅权重发生变化的基金数
+- `entity_count_delta`
+  - 基金主体数变化
+- `eligible_count_delta`
+  - 最新月可投基金数变化
+- `cumulative_return_delta`
+  - 策略累计收益变化
+
+### 13.2 `backtest_summary_diff.json`
+
+作用：
+
+- 逐字段比较最近两次实验的回测摘要
+
+字段说明：
+
+- 每个指标都包含：
+  - `previous`
+  - `current`
+  - `delta`
+
+### 13.3 `type_baseline_diff.json`
+
+作用：
+
+- 比较最近两次实验在基金类型分布上的迁移
+
+字段说明：
+
+- `entity_count`
+  - 主体总数变化
+- `eligible_count`
+  - 最新月可投主体数变化
+- `entity_type_count`
+  - 主体层各类型数量变化
+- `latest_type_count`
+  - 最新月基金池层各类型数量变化
+- `eligible_type_count`
+  - 最新月可投层各类型数量变化
+
+### 13.4 `portfolio_diff.csv`
+
+作用：
+
+- 比较最近两次实验最新组合的持仓变化
+
+字段说明：
+
+- `entity_id`
+- `entity_name`
+- `fund_company`
+- `change_type`
+  - `added` / `removed` / `reweighted` / `unchanged`
+- `previous_rank`
+- `current_rank`
+- `previous_weight`
+- `current_weight`
+- `weight_delta`

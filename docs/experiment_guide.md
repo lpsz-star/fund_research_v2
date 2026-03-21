@@ -44,6 +44,15 @@ PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/defau
 PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare.json
 ```
 
+当前标准实验对比命令：
+
+```bash
+make compare-sample
+make compare-tushare
+```
+
+它默认比较同一数据源最近两次完整实验记录，并输出标准差异报告，而不是要求人工逐项翻历史文件。
+
 ## 3. 一次完整实验会产出什么
 
 运行完整实验后，当前会写出以下产物：
@@ -87,6 +96,14 @@ PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tusha
 ### 3.4 实验追踪层
 
 - [`experiment_registry.jsonl`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/experiments/experiment_registry.jsonl)
+
+### 3.5 实验对比层
+
+- [`comparison_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/comparison_summary.json)
+- [`backtest_summary_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/backtest_summary_diff.json)
+- [`type_baseline_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_diff.json)
+- [`portfolio_diff.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/portfolio_diff.csv)
+- [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/comparison_report.md)
 
 ## 4. 如何判断两次实验是否可比
 
@@ -154,6 +171,18 @@ make fetch-failed-tushare
 - [`fetch_diagnostics_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/fetch_diagnostics_report.md)
 - [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/portfolio_report.md)
 - [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/backtest_summary.json)
+
+如果你刚做完一次代码或参数调整，建议紧接着执行：
+
+```bash
+make compare-tushare
+```
+
+优先查看：
+
+- [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/comparison_report.md)
+- [`portfolio_diff.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/portfolio_diff.csv)
+- [`backtest_summary_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/backtest_summary_diff.json)
 
 ## 6. 实验阅读顺序建议
 
