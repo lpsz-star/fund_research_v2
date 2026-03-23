@@ -12,6 +12,9 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
     """按基金实体和月份构建特征表。"""
     entity_lookup = {str(row["entity_id"]): row for row in dataset.fund_entity_master}
     manager_lookup = {(str(row["entity_id"]), str(row["month"])): row for row in dataset.manager_assignment_monthly}
+    manager_rows_by_entity: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in dataset.manager_assignment_monthly:
+        manager_rows_by_entity[str(row["entity_id"])].append(row)
     eligibility = {(str(row["entity_id"]), str(row["month"])): int(row["is_eligible"]) for row in universe.rows}
     nav_by_entity: dict[str, list[dict[str, object]]] = defaultdict(list)
     benchmark_rows = sorted(dataset.benchmark_monthly, key=lambda item: str(item["month"]))
@@ -44,7 +47,12 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
             excess_ret_6m = round(_window_total_return(returns, index, 6) - _window_total_return_from_scalar(benchmark_lookup, months, index, 6), 6)
             excess_ret_12m = round(_window_total_return(returns, index, 12) - _window_total_return_from_scalar(benchmark_lookup, months, index, 12), 6)
             monthly_excess_returns = _monthly_excess_returns(returns, months, benchmark_lookup)
+            benchmark_returns = [benchmark_lookup.get(visible_month, 0.0) for visible_month in months]
             manager_row = manager_lookup.get((entity_id, month))
+            visible_manager_rows = [
+                row for row in sorted(manager_rows_by_entity.get(entity_id, []), key=lambda item: str(item["month"]))
+                if str(row["month"]) <= month
+            ]
             manager_post_change_excess_delta_12m, manager_post_change_observation_months = _manager_post_change_excess_delta(
                 months=months,
                 monthly_excess_returns=monthly_excess_returns,
@@ -73,18 +81,32 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
                     "excess_ret_12m": excess_ret_12m,
                     # 一致性因子优先回答“多个窗口是否持续跑赢”，先不用幅度大小主导结果，避免单一窗口极端行情放大噪声。
                     "excess_consistency_12m": _excess_consistency_ratio(excess_ret_3m, excess_ret_6m, excess_ret_12m),
+                    "excess_hit_rate_12m": _window_excess_hit_rate(returns, benchmark_returns, index, 12),
+                    "excess_streak_6m": _window_excess_streak(monthly_excess_returns, index, 6),
                     "vol_12m": _window_volatility(returns, index, 12),
                     "downside_vol_12m": _window_downside_volatility(returns, index, 12),
                     "max_drawdown_12m": _window_max_drawdown(navs, index, 12),
                     "drawdown_recovery_ratio_12m": _window_drawdown_recovery_ratio(navs, index, 12),
+                    "drawdown_duration_ratio_12m": _window_drawdown_duration_ratio(navs, index, 12),
                     "months_since_drawdown_low_12m": _window_months_since_drawdown_low(navs, index, 12),
                     "hit_rate_12m": _window_hit_rate(returns, index, 12),
                     "profit_loss_ratio_12m": _window_profit_loss_ratio(returns, index, 12),
                     "worst_3m_avg_return_12m": _window_worst_average_return(returns, index, 12, 3),
+                    "tail_loss_ratio_12m": _window_tail_loss_ratio(returns, index, 12, 2),
                     "manager_post_change_excess_delta_12m": manager_post_change_excess_delta_12m,
+                    "manager_post_change_downside_vol_delta_12m": _manager_post_change_downside_vol_delta(
+                        months=months,
+                        returns=returns,
+                        manager_start_month=_manager_start_month_for_feature(entity, manager_row),
+                        current_month=month,
+                        window=12,
+                    ),
                     "manager_post_change_observation_months": manager_post_change_observation_months,
                     "manager_tenure_months": _manager_tenure_months(entity, month, manager_row),
+                    "manager_change_count_24m": _manager_change_count(visible_manager_rows, 24),
                     "asset_stability_12m": _window_asset_stability(assets, index, 12),
+                    "asset_growth_6m": _window_asset_growth(assets, index, 6),
+                    "asset_flow_volatility_12m": _window_asset_flow_volatility(assets, index, 12),
                 }
             )
     return feature_rows
@@ -292,6 +314,36 @@ def _window_hit_rate(values: list[float], end_index: int, window: int) -> float:
     return round(positive_count / len(subset), 6)
 
 
+def _window_excess_hit_rate(values: list[float], benchmark_values: list[float], end_index: int, window: int) -> float:
+    """统计窗口内基金月收益跑赢 benchmark 的月份占比。"""
+    fund_subset = _window_slice(values, end_index, window)
+    benchmark_subset = _window_slice(benchmark_values, end_index, window)
+    if not fund_subset or not benchmark_subset:
+        return 0.0
+    sample_count = min(len(fund_subset), len(benchmark_subset))
+    if sample_count <= 0:
+        return 0.0
+    hit_count = sum(
+        1
+        for fund_value, benchmark_value in zip(fund_subset[-sample_count:], benchmark_subset[-sample_count:])
+        if fund_value > benchmark_value
+    )
+    return round(hit_count / sample_count, 6)
+
+
+def _window_excess_streak(monthly_excess_returns: list[float], end_index: int, window: int) -> int:
+    """统计窗口内最长连续正超额月份数，刻画超额表现是否具备连续性。"""
+    streak = 0
+    best_streak = 0
+    for value in _window_slice(monthly_excess_returns, end_index, window):
+        if value > 0:
+            streak += 1
+            best_streak = max(best_streak, streak)
+            continue
+        streak = 0
+    return best_streak
+
+
 def _window_profit_loss_ratio(values: list[float], end_index: int, window: int) -> float:
     """比较窗口内平均盈利月收益与平均亏损月跌幅，避免只看正收益次数却忽略亏损杀伤力。"""
     subset = _window_slice(values, end_index, window)
@@ -320,6 +372,18 @@ def _window_worst_average_return(values: list[float], end_index: int, window: in
     return round(sum(selected) / len(selected), 6)
 
 
+def _window_tail_loss_ratio(values: list[float], end_index: int, window: int, tail_count: int) -> float:
+    """计算窗口内尾部亏损占全部亏损的比例，识别亏损是否过度集中。"""
+    negative_losses = sorted((-value for value in _window_slice(values, end_index, window) if value < 0), reverse=True)
+    if not negative_losses:
+        return 0.0
+    tail_subset = negative_losses[: max(1, min(tail_count, len(negative_losses)))]
+    total_loss = sum(negative_losses)
+    if total_loss <= 0:
+        return 0.0
+    return round(sum(tail_subset) / total_loss, 6)
+
+
 def _manager_post_change_excess_delta(
     *,
     months: list[str],
@@ -343,6 +407,29 @@ def _manager_post_change_excess_delta(
     return round(post_mean - pre_mean, 6), len(post_values)
 
 
+def _manager_post_change_downside_vol_delta(
+    *,
+    months: list[str],
+    returns: list[float],
+    manager_start_month: str | None,
+    current_month: str,
+    window: int,
+) -> float | None:
+    """比较现任经理上任前后下行波动变化，观察换帅后亏损月份的杀伤力是否收敛。"""
+    if manager_start_month is None or manager_start_month > current_month:
+        return None
+    history = [(month, value) for month, value in zip(months, returns) if month <= current_month]
+    if not history:
+        return None
+    post_values = [value for month, value in history if month >= manager_start_month][-window:]
+    pre_values = [value for month, value in history if month < manager_start_month][-window:]
+    if len(post_values) < 3 or len(pre_values) < 3:
+        return None
+    post_downside_vol = _downside_volatility_from_values(post_values)
+    pre_downside_vol = _downside_volatility_from_values(pre_values)
+    return round(post_downside_vol - pre_downside_vol, 6)
+
+
 def _window_asset_stability(values: list[float], end_index: int, window: int) -> float:
     """用窗口内规模波动幅度刻画规模稳定性。"""
     subset = _window_slice(values, end_index, window)
@@ -350,6 +437,74 @@ def _window_asset_stability(values: list[float], end_index: int, window: int) ->
         return 0.0
     # 数值越大表示规模波动越大；后续在稳定性打分里会按“更稳定更好”的方向处理。
     return round(max(subset) / min(subset) - 1.0, 6)
+
+
+def _window_asset_growth(values: list[float], end_index: int, window: int) -> str | float:
+    """计算当前规模相对若干月前的增长率，作为容量变化观察指标。"""
+    start_index = end_index - window
+    if start_index < 0:
+        return ""
+    current_value = values[end_index]
+    start_value = values[start_index]
+    if current_value <= 0 or start_value <= 0:
+        return ""
+    return round(current_value / start_value - 1.0, 6)
+
+
+def _window_asset_flow_volatility(values: list[float], end_index: int, window: int) -> str | float:
+    """计算窗口内月度规模变化率波动，识别是否存在大起大落的资金进出。"""
+    subset = _window_slice(values, end_index, window)
+    if len(subset) < 2:
+        return ""
+    growth_rates: list[float] = []
+    for previous_value, current_value in zip(subset, subset[1:]):
+        if previous_value <= 0 or current_value <= 0:
+            return ""
+        growth_rates.append(current_value / previous_value - 1.0)
+    if not growth_rates:
+        return ""
+    mean = sum(growth_rates) / len(growth_rates)
+    variance = sum((value - mean) ** 2 for value in growth_rates) / len(growth_rates)
+    return round(sqrt(variance), 6)
+
+
+def _manager_change_count(manager_rows: list[dict[str, object]], window: int) -> int:
+    """统计窗口内经理名称发生变化的次数。"""
+    if not manager_rows:
+        return 0
+    subset = manager_rows[-window:]
+    previous_name = ""
+    change_count = 0
+    for row in subset:
+        manager_name = str(row.get("manager_name") or "").strip()
+        if previous_name and manager_name and manager_name != previous_name:
+            change_count += 1
+        if manager_name:
+            previous_name = manager_name
+    return change_count
+
+
+def _window_drawdown_duration_ratio(navs: list[float], end_index: int, window: int) -> float:
+    """统计窗口内净值处于历史峰值下方的月份占比，刻画回撤拖延是否持久。"""
+    subset = _window_slice(navs, end_index, window)
+    if not subset:
+        return 0.0
+    peak = subset[0]
+    underwater_months = 0
+    for nav in subset:
+        peak = max(peak, nav)
+        if nav < peak:
+            underwater_months += 1
+    return round(underwater_months / len(subset), 6)
+
+
+def _downside_volatility_from_values(values: list[float]) -> float:
+    """对任意收益子序列计算下行波动率，供事件前后比较复用。"""
+    subset = [value for value in values if value < 0]
+    if not subset:
+        return 0.0
+    variance = sum(value**2 for value in subset) / len(subset)
+    return sqrt(variance)
 
 
 def _excess_consistency_ratio(*window_excess_returns: float) -> float:

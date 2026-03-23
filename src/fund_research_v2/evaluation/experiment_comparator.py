@@ -220,6 +220,9 @@ def _build_comparison_summary(comparison: dict[str, object]) -> dict[str, object
         "cumulative_return_delta": _dig(comparison, "backtest_summary_diff", "cumulative_return", "delta"),
         "benchmark_cumulative_return_delta": _dig(comparison, "backtest_summary_diff", "benchmark_cumulative_return", "delta"),
         "excess_cumulative_return_delta": _dig(comparison, "backtest_summary_diff", "excess_cumulative_return", "delta"),
+        "missing_month_count_delta": _dig(comparison, "backtest_summary_diff", "missing_month_count", "delta"),
+        "low_confidence_month_count_delta": _dig(comparison, "backtest_summary_diff", "low_confidence_month_count", "delta"),
+        "max_missing_weight_delta": _dig(comparison, "backtest_summary_diff", "max_missing_weight", "delta"),
     }
 
 

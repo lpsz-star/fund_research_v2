@@ -66,9 +66,42 @@ def _benchmark_summary_lines(config: AppConfig, dataset_metadata: dict[str, obje
 def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], summary: dict[str, object]) -> None:
     """把回测结果写成简洁的 Markdown 报告。"""
     # 报告优先写成 Markdown，是为了让实验输出天然可版本化、可 diff，而不是锁死在 notebook 或富文本里。
+    low_confidence_rows = [row for row in backtest_rows if int(row.get("low_confidence_flag", 0)) == 1]
+    highest_missing_rows = sorted(
+        [row for row in backtest_rows if float(row.get("missing_weight", 0.0)) > 0],
+        key=lambda item: (-float(item.get("missing_weight", 0.0)), str(item.get("execution_month", ""))),
+    )
     lines = ["# Backtest Report", "", "## Summary", ""]
     for key, value in summary.items():
         lines.append(f"- {key}: {value}")
+    lines.extend(["", "## Data Quality Diagnostics", ""])
+    lines.append(f"- missing_month_count: {summary.get('missing_month_count', 0)}")
+    lines.append(f"- low_confidence_month_count: {summary.get('low_confidence_month_count', 0)}")
+    lines.append(f"- avg_missing_weight: {summary.get('avg_missing_weight', 0.0)}")
+    lines.append(f"- max_missing_weight: {summary.get('max_missing_weight', 0.0)}")
+    lines.extend(["", "## Low Confidence Months", ""])
+    if low_confidence_rows:
+        for row in low_confidence_rows[:12]:
+            lines.append(
+                f"- {row['execution_month']}: signal_month={row.get('signal_month', '')} "
+                f"missing_weight={row.get('missing_weight', 0.0)} "
+                f"missing_positions={row.get('missing_position_count', 0)} "
+                f"validity={row.get('return_validity', '')} "
+                f"net={row.get('portfolio_return_net', '')}"
+            )
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Highest Missing Weight Months", ""])
+    if highest_missing_rows:
+        for row in highest_missing_rows[:12]:
+            lines.append(
+                f"- {row['execution_month']}: signal_month={row.get('signal_month', '')} "
+                f"missing_weight={row.get('missing_weight', 0.0)} "
+                f"missing_positions={row.get('missing_position_count', 0)} "
+                f"low_confidence={row.get('low_confidence_flag', 0)}"
+            )
+    else:
+        lines.append("- none")
     lines.extend(
         [
             "",
@@ -85,7 +118,9 @@ def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], s
             f"- {row['execution_month']}: request_proxy={row.get('execution_request_date_proxy', '')}, "
             f"effective_proxy={row.get('execution_effective_date_proxy', '')}, "
             f"net={row['portfolio_return_net']}, "
-            f"benchmark={row['benchmark_return']}, benchmark_mix={row.get('benchmark_mix', '')}, turnover={row['turnover']}"
+            f"benchmark={row['benchmark_return']}, benchmark_mix={row.get('benchmark_mix', '')}, turnover={row['turnover']}, "
+            f"missing_weight={row.get('missing_weight', 0.0)}, missing_positions={row.get('missing_position_count', 0)}, "
+            f"validity={row.get('return_validity', '')}, low_confidence={row.get('low_confidence_flag', 0)}"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -368,10 +403,15 @@ def render_experiment_report(
     dataset_metadata: dict[str, object],
     score_rows: list[dict[str, object]],
     portfolio_rows: list[dict[str, object]],
+    backtest_rows: list[dict[str, object]],
     backtest_summary: dict[str, object],
 ) -> None:
     """把最新月评分、组合和回测摘要写成实验报告。"""
     latest_month = _latest_research_month(config, score_rows)
+    top_risk_rows = sorted(
+        [row for row in backtest_rows if float(row.get("missing_weight", 0.0)) > 0],
+        key=lambda item: (-float(item.get("missing_weight", 0.0)), str(item.get("execution_month", ""))),
+    )[:5]
     # 实验报告强调“这套配置+这份数据快照产出了什么结果”，因此先交代实验上下文，再摘要展示最新月与历史表现。
     latest_rows = _latest_month_rows(score_rows, latest_month, config.reporting.top_ranked_limit)
     month_range = dataset_metadata.get("month_range", {}) if isinstance(dataset_metadata.get("month_range"), dict) else {}
@@ -421,6 +461,27 @@ def render_experiment_report(
     lines.extend(["", "## Backtest Summary", ""])
     for key, value in backtest_summary.items():
         lines.append(f"- {key}: {value}")
+    lines.extend(["", "## Backtest Reliability", ""])
+    lines.append(f"- missing_month_count: {backtest_summary.get('missing_month_count', 0)}")
+    lines.append(f"- low_confidence_month_count: {backtest_summary.get('low_confidence_month_count', 0)}")
+    lines.append(f"- avg_missing_weight: {backtest_summary.get('avg_missing_weight', 0.0)}")
+    lines.append(f"- max_missing_weight: {backtest_summary.get('max_missing_weight', 0.0)}")
+    if int(backtest_summary.get("low_confidence_month_count", 0)) > 0:
+        lines.append("- interpretation: 存在低置信度月份，建议结合 backtest_report.md 与 backtest_position_audit.csv 一起阅读。")
+    else:
+        lines.append("- interpretation: 当前回测未识别出低置信度月份。")
+    lines.extend(["", "## Top Risk Months", ""])
+    if top_risk_rows:
+        for row in top_risk_rows:
+            lines.append(
+                f"- {row['execution_month']}: signal_month={row.get('signal_month', '')} "
+                f"missing_weight={row.get('missing_weight', 0.0)} "
+                f"missing_positions={row.get('missing_position_count', 0)} "
+                f"validity={row.get('return_validity', '')} "
+                f"low_confidence={row.get('low_confidence_flag', 0)}"
+            )
+    else:
+        lines.append("- none")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
 

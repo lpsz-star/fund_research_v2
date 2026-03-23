@@ -10,12 +10,14 @@ from fund_research_v2.common.date_utils import current_timestamp, latest_complet
 from fund_research_v2.common.io_utils import append_jsonl, ensure_directories, write_csv, write_json
 from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, load_dataset, warm_failed_api_cache
 from fund_research_v2.evaluation.experiment_comparator import build_experiment_comparison, load_portfolio_snapshot, read_experiment_records
+from fund_research_v2.evaluation.robustness import build_robustness_analysis, default_baseline_config_path
 from fund_research_v2.evaluation.metrics import summarize_backtest
 from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
 from fund_research_v2.features.feature_builder import build_feature_rows
 from fund_research_v2.portfolio.construction import build_portfolio
 from fund_research_v2.ranking.scoring_engine import score_funds
 from fund_research_v2.reporting.comparison_reports import render_comparison_report
+from fund_research_v2.reporting.robustness_reports import render_robustness_report
 from fund_research_v2.reporting.reports import (
     render_backtest_report,
     render_experiment_report,
@@ -68,6 +70,32 @@ def compare_experiments_command(config_path: Path) -> None:
     write_json(result_dir / "type_baseline_diff.json", comparison.get("type_baseline_diff", {}))
     write_csv(result_dir / "portfolio_diff.csv", comparison.get("portfolio_diff_rows", []))
     render_comparison_report(report_dir / "comparison_report.md", comparison)
+
+
+def analyze_robustness_command(config_path: Path) -> None:
+    """对候选评分体系相对默认 baseline 做只读稳健性验证。"""
+    config = load_config(config_path)
+    baseline_config_path = default_baseline_config_path(config_path, config.data_source)
+    candidate_bundle = prepare_bundle(config_path)
+    baseline_bundle = prepare_bundle(baseline_config_path)
+    candidate_config: AppConfig = candidate_bundle["config"]
+    project_root: Path = candidate_bundle["project_root"]
+    ensure_directories(all_artifact_dirs(candidate_config, project_root))
+    analysis = build_robustness_analysis(
+        candidate_config=candidate_bundle["config"],
+        baseline_config=baseline_bundle["config"],
+        dataset=candidate_bundle["dataset"],
+        candidate_score_rows=candidate_bundle["score_rows"],
+        baseline_score_rows=baseline_bundle["score_rows"],
+    )
+    result_dir = artifact_dir(candidate_config, project_root, candidate_config.paths.result_dir)
+    report_dir = artifact_dir(candidate_config, project_root, candidate_config.paths.report_dir)
+    write_json(result_dir / "robustness_summary.json", analysis.get("summary", {}))
+    write_csv(result_dir / "robustness_time_slices.csv", analysis.get("time_slice_rows", []))
+    write_csv(result_dir / "robustness_month_contribution.csv", analysis.get("month_contribution_rows", []))
+    write_csv(result_dir / "robustness_portfolio_behavior.csv", analysis.get("portfolio_behavior_rows", []))
+    write_csv(result_dir / "robustness_factor_regime.csv", analysis.get("factor_regime_rows", []))
+    render_robustness_report(report_dir / "robustness_report.md", analysis)
 
 
 def run_universe_command(config_path: Path) -> None:
@@ -125,14 +153,14 @@ def run_backtest_command(config_path: Path) -> None:
     """在统一数据快照上执行完整回测并写出结果。"""
     bundle = prepare_bundle(config_path)
     # 这里仍然复用同一份 bundle，是为了保证回测看到的基金池和评分结果与研究输出完全一致。
-    backtest_rows = run_backtest(
+    backtest_rows, position_audit_rows = run_backtest(
         config=bundle["config"],
         score_rows=bundle["score_rows"],
         nav_rows=bundle["dataset"].fund_nav_monthly,
         benchmark_rows=bundle["dataset"].benchmark_monthly,
     )
     backtest_summary = summarize_backtest(backtest_rows)
-    write_full_outputs(bundle, backtest_rows, backtest_summary, [])
+    write_full_outputs(bundle, backtest_rows, position_audit_rows, backtest_summary, [])
 
 
 def run_experiment_command(config_path: Path) -> None:
@@ -142,14 +170,14 @@ def run_experiment_command(config_path: Path) -> None:
     # 组合只取最新月评分结果，是因为实验报告默认回答“如果今天运行系统，会给出什么建议”。
     latest_scores = [row for row in bundle["score_rows"] if str(row["month"]) == latest_month]
     portfolio_rows = build_portfolio(bundle["config"], latest_scores)
-    backtest_rows = run_backtest(
+    backtest_rows, position_audit_rows = run_backtest(
         config=bundle["config"],
         score_rows=bundle["score_rows"],
         nav_rows=bundle["dataset"].fund_nav_monthly,
         benchmark_rows=bundle["dataset"].benchmark_monthly,
     )
     backtest_summary = summarize_backtest(backtest_rows)
-    write_full_outputs(bundle, backtest_rows, backtest_summary, portfolio_rows)
+    write_full_outputs(bundle, backtest_rows, position_audit_rows, backtest_summary, portfolio_rows)
 
 
 def prepare_bundle(config_path: Path) -> dict[str, object]:
@@ -222,6 +250,7 @@ def write_clean_outputs(bundle: dict[str, object]) -> None:
 def write_full_outputs(
     bundle: dict[str, object],
     backtest_rows: list[dict[str, object]],
+    position_audit_rows: list[dict[str, object]],
     backtest_summary: dict[str, object],
     portfolio_rows: list[dict[str, object]],
 ) -> None:
@@ -244,6 +273,7 @@ def write_full_outputs(
         write_portfolio_outputs(bundle, latest_month, latest_scores, portfolio_rows)
     result_dir = artifact_dir(config, project_root, config.paths.result_dir)
     write_csv(result_dir / "backtest_monthly.csv", backtest_rows)
+    write_csv(result_dir / "backtest_position_audit.csv", position_audit_rows)
     write_json(result_dir / "backtest_summary.json", backtest_summary)
     factor_evaluation = evaluate_factors(feature_rows, dataset.fund_nav_monthly)
     write_json(result_dir / "factor_evaluation.json", factor_evaluation)
@@ -267,6 +297,7 @@ def write_full_outputs(
         dataset_metadata=dataset.metadata,
         score_rows=score_rows,
         portfolio_rows=portfolio_rows,
+        backtest_rows=backtest_rows,
         backtest_summary=backtest_summary,
     )
 

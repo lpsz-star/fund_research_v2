@@ -514,8 +514,50 @@
   - 当月交易成本
 - `holdings`
   - 持仓数量
+- `missing_weight`
+  - 持仓中缺少 `execution_month` 月收益记录的权重之和
+- `missing_position_count`
+  - 持仓中缺少 `execution_month` 月收益记录的基金数量
+- `low_confidence_flag`
+  - 若缺失收益权重超过配置阈值，则记为 `1`
+- `return_validity`
+  - 当前月回测收益的有效性标签
+  - 当前支持：
+    - `valid`
+    - `partial_missing`
+    - `all_missing`
+    - `empty_portfolio`
 
-## 11. `dataset_snapshot.json`
+## 11. `backtest_position_audit.csv`
+
+作用：
+
+- 保存逐月回测中每个持仓在执行月的收益观测状态与处理方式
+
+字段说明：
+
+- `signal_month`
+  - 生成组合信号的月份
+- `execution_month`
+  - 持仓收益所属月份
+- `entity_id`
+  - 基金实体 ID
+- `entity_name`
+  - 基金名称
+- `target_weight`
+  - 该基金在该月组合中的目标权重
+- `observed_return_1m`
+  - 实际观察到的 `execution_month` 月收益；若缺失则留空
+- `applied_return_1m`
+  - 回测实际采用的收益值
+- `outcome_status`
+  - 当前支持：
+    - `observed_return`
+    - `missing_return`
+- `handling_policy`
+  - 当前采用的缺失收益处理策略
+
+## 12. `dataset_snapshot.json`
 
 作用：
 
@@ -543,7 +585,7 @@
 - `entity_asset_aggregation`
   - 当前实体规模汇总口径标识
 
-## 12. `experiment_registry.jsonl`
+## 13. `experiment_registry.jsonl`
 
 作用：
 

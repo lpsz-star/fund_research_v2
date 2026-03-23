@@ -99,10 +99,38 @@
 当前版本采用以下简化规则：
 
 - 若组合中的某只基金在下一月缺少收益，则按 0 处理
+- 同时把该类情况显式记录为持有期缺失收益审计，而不再完全隐含在组合收益中
 - 若当月无可投资基金，则该期显式记为空仓，不再跳过该月
 - 若某只基金因约束被过滤，不进入组合
 
-这部分仍然比较简化，后续应进一步升级为明确的异常审计逻辑。
+当前回测结果表会额外输出以下审计字段：
+
+- `missing_weight`
+  - 当前月组合中，缺少 `execution_month` 收益记录的持仓权重之和
+- `missing_position_count`
+  - 当前月缺少 `execution_month` 收益记录的持仓基金数量
+- `low_confidence_flag`
+  - 若 `missing_weight` 超过 `backtest.missing_weight_warning_threshold`，该月记为低置信度月份
+- `return_validity`
+  - 当前支持：
+    - `valid`
+    - `partial_missing`
+    - `all_missing`
+    - `empty_portfolio`
+
+当前配置中还增加了：
+
+- `backtest.missing_return_policy`
+  - 当前支持：
+    - `zero_fill_legacy`
+    - `audit_only`
+
+注意：
+
+- 当前这两个策略在收益计算上仍都保留“缺失收益按 `0` 计”的兼容口径
+- `audit_only` 的作用主要是为后续更严格处理预留配置入口，而不是现在就改变历史收益定义
+- 当前系统仍不尝试把缺失收益解释为清盘、暂停申赎或其他生命周期事件
+- 这部分仅回答“有多少权重缺少收益观测”，不回答“为什么缺失”
 
 ## 8. 当前未覆盖的重要现实问题
 

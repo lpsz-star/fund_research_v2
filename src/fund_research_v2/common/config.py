@@ -42,6 +42,8 @@ class BacktestConfig:
     end_month: str | None
     benchmark_field: str
     transaction_cost_bps: float
+    missing_return_policy: str
+    missing_weight_warning_threshold: float
 
 
 @dataclass(frozen=True)
@@ -173,6 +175,8 @@ def load_config(path: Path) -> AppConfig:
             end_month=raw["backtest"].get("end_month"),
             benchmark_field=raw["backtest"].get("benchmark_field", "benchmark_return_1m"),
             transaction_cost_bps=float(raw["backtest"].get("transaction_cost_bps", 10.0)),
+            missing_return_policy=raw["backtest"].get("missing_return_policy", "zero_fill_legacy"),
+            missing_weight_warning_threshold=float(raw["backtest"].get("missing_weight_warning_threshold", 0.05)),
         ),
         benchmark=benchmark,
         reporting=ReportingConfig(top_ranked_limit=int(raw["reporting"].get("top_ranked_limit", 10))),
@@ -248,6 +252,10 @@ def _validate(config: AppConfig) -> None:
     }.items():
         if value is not None:
             _validate_month(field_name, value)
+    if config.backtest.missing_return_policy not in {"zero_fill_legacy", "audit_only"}:
+        raise ValueError("backtest.missing_return_policy 必须是 zero_fill_legacy 或 audit_only。")
+    if not 0 <= config.backtest.missing_weight_warning_threshold <= 1:
+        raise ValueError("backtest.missing_weight_warning_threshold 必须位于 [0, 1]。")
 
 
 def _validate_month(field_name: str, value: str) -> None:

@@ -9,6 +9,7 @@ def summarize_backtest(backtest_rows: list[dict[str, object]]) -> dict[str, obje
         return {"months": 0}
     net_returns = [float(row["portfolio_return_net"]) for row in backtest_rows]
     benchmark_returns = [float(row["benchmark_return"]) for row in backtest_rows]
+    missing_weights = [float(row.get("missing_weight", 0.0)) for row in backtest_rows]
     cumulative = 1.0
     benchmark_cumulative = 1.0
     peak = 1.0
@@ -32,4 +33,8 @@ def summarize_backtest(backtest_rows: list[dict[str, object]]) -> dict[str, obje
         "win_rate": round(sum(1 for value in net_returns if value > 0) / len(net_returns), 6),
         "benchmark_cumulative_return": round(benchmark_cumulative - 1.0, 6),
         "excess_cumulative_return": round(cumulative - benchmark_cumulative, 6),
+        "missing_month_count": sum(1 for row in backtest_rows if str(row.get("return_validity", "")) in {"partial_missing", "all_missing"}),
+        "low_confidence_month_count": sum(1 for row in backtest_rows if int(row.get("low_confidence_flag", 0)) == 1),
+        "avg_missing_weight": round(sum(missing_weights) / len(missing_weights), 6),
+        "max_missing_weight": round(max(missing_weights), 6),
     }

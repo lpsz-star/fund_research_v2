@@ -60,6 +60,14 @@ make compare-tushare
 
 它默认比较同一数据源最近两次完整实验记录，并输出标准差异报告，而不是要求人工逐项翻历史文件。
 
+当前标准稳健性验证命令：
+
+```bash
+PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/tushare_scoring_v2.json
+```
+
+这条命令不会修改策略、评分、回测逻辑，只会基于当前候选配置和默认 baseline 重做分析并输出稳健性诊断产物。
+
 ## 3. 一次完整实验会产出什么
 
 运行完整实验后，当前会写出以下产物：
@@ -87,6 +95,7 @@ make compare-tushare
 - [`portfolio_target_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_target_monthly.csv)
 - [`portfolio_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_snapshot.json)
 - [`backtest_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_monthly.csv)
+- [`backtest_position_audit.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_position_audit.csv)
 - [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_summary.json)
 - [`factor_evaluation.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/factor_evaluation.json)
 - [`factor_evaluation.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/factor_evaluation.csv)
@@ -111,6 +120,15 @@ make compare-tushare
 - [`type_baseline_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_diff.json)
 - [`portfolio_diff.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/portfolio_diff.csv)
 - [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/comparison_report.md)
+
+### 3.6 稳健性验证层
+
+- [`robustness_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_summary.json)
+- [`robustness_time_slices.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_time_slices.csv)
+- [`robustness_month_contribution.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_month_contribution.csv)
+- [`robustness_portfolio_behavior.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_portfolio_behavior.csv)
+- [`robustness_factor_regime.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_factor_regime.csv)
+- [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/robustness_report.md)
 
 ## 4. 如何判断两次实验是否可比
 
@@ -210,6 +228,19 @@ make compare-tushare
 - 不应只看累计收益，还要同时看组合是否发生了大幅换仓
 - 若提升过大，优先怀疑是否对当前样本更敏感，而不是直接认定新体系必然更优
 
+若你要进一步确认 `tushare_scoring_v2` 的提升是否稳健，建议再执行：
+
+```bash
+PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/tushare_scoring_v2.json
+```
+
+优先查看：
+
+- [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/robustness_report.md)
+- [`robustness_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_summary.json)
+- [`robustness_time_slices.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_time_slices.csv)
+- [`robustness_month_contribution.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_month_contribution.csv)
+
 ## 6. 实验阅读顺序建议
 
 如果你要理解一次实验结果，建议按以下顺序阅读：
@@ -228,6 +259,8 @@ make compare-tushare
    - 看本次实验上下文与结果总览
 7. [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/backtest_report.md)
    - 再看历史表现
+8. [`backtest_position_audit.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/backtest_position_audit.csv)
+   - 若某些月份表现异常或回测可信度下降，优先确认是否存在持有期缺失收益
 
 ## 6.1 读报告时必须注意的时点边界
 
@@ -237,6 +270,8 @@ make compare-tushare
 - 报告里的 `latest_month` 默认是 `as_of_date` 之前最后一个完整月，不等于 raw 快照中的最大月份。
 - 若当前日期仍在月中，当月只可视为“月内观察快照”，不能直接当正式信号月。
 - 报告中看到的 `Time Boundary Notes` 章节，应视为阅读结果前的硬性前提。
+- 若 `backtest_monthly.csv` 中出现较大的 `missing_weight`，该月收益应视为低置信度结果，不能和普通月份等价比较。
+- `backtest_position_audit.csv` 目前只回答“哪只持仓缺失了收益、回测如何处理”，不回答缺失原因是否来自清盘或暂停申赎。
 
 ## 7. 什么时候必须重跑 baseline
 

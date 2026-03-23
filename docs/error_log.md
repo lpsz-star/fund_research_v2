@@ -281,3 +281,22 @@
   - 修复后，`latest_month` 可能小于 raw 快照中的最大 `month`，新旧实验不再完全可比。
 - 当前状态：已修复，并补充测试。
 - 当前状态：已修复，并补充测试。
+
+## 16. 持有期缺失收益曾被静默按 0 处理，缺乏显式审计
+
+- 发现时间：2026-03-23
+- 影响模块：
+  - [`engine.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/backtest/engine.py)
+  - [`metrics.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/evaluation/metrics.py)
+  - [`reports.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/reporting/reports.py)
+- 现象：
+  - 当持仓基金在 `execution_month` 缺少收益时，回测会直接按 `0` 计入组合，但结果表与报告无法回答“有多少权重其实缺少收益观测”。
+- 根因：
+  - 旧实现把缺失收益处理视为引擎内部细节，没有把缺失权重、缺失持仓数和月份置信度显式落盘。
+- 修复方案：
+  - 保留 `zero_fill_legacy` 兼容口径。
+  - 新增 `missing_weight`、`missing_position_count`、`low_confidence_flag`、`return_validity` 与 `backtest_position_audit.csv`。
+- 影响范围：
+  - 修复前，协作者容易把存在缺失收益的月份误读为与普通月份同等可靠。
+  - 修复后，历史收益定义未变，但回测结果的可解释性显著增强。
+- 当前状态：已修复，并补充测试。

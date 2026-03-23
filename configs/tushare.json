@@ -27,7 +27,9 @@
     "start_month": "2023-01",
     "end_month": "2026-02",
     "benchmark_field": "benchmark_return_1m",
-    "transaction_cost_bps": 10.0
+    "transaction_cost_bps": 10.0,
+    "missing_return_policy": "zero_fill_legacy",
+    "missing_weight_warning_threshold": 0.05
   },
   "benchmark": {
     "source": "tushare_index",

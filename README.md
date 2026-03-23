@@ -309,6 +309,23 @@ make portfolio-tushare
 make backtest-tushare
 ```
 
+当前测试已按职责拆分为：
+
+- `tests/pipeline_unit.py`
+- `tests/pipeline_integration.py`
+- `tests/pipeline_regression.py`
+
+同时保留兼容入口：
+
+- `tests/test_pipeline.py`
+
+因此原有命令不需要改：
+
+```bash
+make test
+python3 -m unittest tests.test_pipeline
+```
+
 ## 7. 命令说明
 
 日常使用优先通过 [Makefile](/Users/liupeng/.codex/projects/fund_research_v2/Makefile) 调用。

@@ -43,6 +43,11 @@ def render_comparison_report(path: Path, comparison: dict[str, object]) -> None:
     lines.extend(["", "## Backtest Summary Diff", ""])
     for key, payload in (comparison.get("backtest_summary_diff", {}) if isinstance(comparison.get("backtest_summary_diff"), dict) else {}).items():
         lines.append(f"- {key}: {payload}")
+    lines.extend(["", "## Backtest Reliability Diff", ""])
+    for key in ["missing_month_count", "low_confidence_month_count", "avg_missing_weight", "max_missing_weight"]:
+        payload = (comparison.get("backtest_summary_diff", {}) if isinstance(comparison.get("backtest_summary_diff"), dict) else {}).get(key)
+        if payload is not None:
+            lines.append(f"- {key}: {payload}")
     lines.extend(["", "## Factor Evaluation Diff", ""])
     for key, payload in (comparison.get("factor_evaluation_diff", {}) if isinstance(comparison.get("factor_evaluation_diff"), dict) else {}).items():
         lines.append(f"- {key}: {payload}")

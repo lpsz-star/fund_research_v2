@@ -308,3 +308,64 @@
 - 目的：
   - 减少多份文档同时维护同一规则带来的重复、漂移和冲突。
   - 让 `strategy_spec_v1.md` 真正承担“策略总纲”职责，而不是变成第二份细则手册。
+
+### 34. 为持有期缺失收益补上显式审计字段
+
+- 变更内容：
+  - `backtest` 配置新增 `missing_return_policy` 与 `missing_weight_warning_threshold`。
+  - `backtest_monthly.csv` 新增 `missing_weight`、`missing_position_count`、`low_confidence_flag` 与 `return_validity`。
+  - result 层新增 `backtest_position_audit.csv`。
+  - `backtest_summary.json` 与 `backtest_report.md` 新增缺失收益诊断指标。
+- 目的：
+  - 保留旧版“缺失收益按 0 计”的兼容口径，同时把持有期缺失收益从黑盒处理升级为可审计结果。
+  - 为后续更严格的缺失收益处理和生命周期事件建模预留稳定接口。
+
+### 35. 新增第二批观察层候选因子
+
+- 变更内容：
+  - `feature_builder.py` 新增 `excess_streak_6m`、`drawdown_duration_ratio_12m`、`manager_post_change_downside_vol_delta_12m`、`asset_flow_volatility_12m`。
+  - `factor_evaluator.py` 把上述字段纳入标准单因子评估与相关性诊断。
+  - `tests/test_pipeline.py` 增补第二批观察因子回归测试。
+  - `factor_catalog.md` 同步补充 4 个观察层字段说明。
+- 目的：
+  - 继续在“观察层”扩充候选因子，但先不直接进入评分体系。
+  - 优先补足路径连续性、回撤拖延、换帅后风险变化和资金流波动等与现有动量幅度因子不完全重合的观察维度。
+
+### 36. 重组 `tushare_scoring_v2` 候选评分体系
+
+- 变更内容：
+  - `performance_quality` 引入 `excess_hit_rate_12m`，并下调 `ret_12m` 权重。
+  - `stability_quality` 用 `asset_flow_volatility_12m` 替换 `asset_stability_12m`，保留 `manager_post_change_excess_delta_12m` 的弱权重事件补充。
+  - 同步更新 `factor_catalog.md` 中的 `tushare_scoring_v2` 说明。
+- 目的：
+  - 在不改默认 baseline 的前提下，把“保留观察”的新因子纳入候选评分体系做真实对照。
+  - 尽量减少与旧候选体系中高相关字段的重复暴露。
+
+### 37. 拆分 `tushare_scoring_v2` 与 `tushare_scoring_v3`
+
+- 变更内容：
+  - 将 [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json) 恢复为上一版表现更强的候选评分配置。
+  - 新增 [`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)，承接本轮把 `excess_hit_rate_12m` 与 `asset_flow_volatility_12m` 纳入评分体系的实验配置。
+  - 同步更新 `factor_catalog.md` 的 `v2` / `v3` 说明。
+- 目的：
+  - 保留历史上表现更好的 `v2` 作为稳定候选基线。
+  - 让后续新因子评分实验在 `v3` 上独立迭代，避免反复覆盖旧对照配置。
+
+### 38. 新增候选评分稳健性验证工作流
+
+- 变更内容：
+  - 新增 CLI 命令 `analyze-robustness`。
+  - 新增 [`evaluation/robustness.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/evaluation/robustness.py) 与 [`reporting/robustness_reports.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/reporting/robustness_reports.py)。
+  - result 层新增 `robustness_summary.json`、`robustness_time_slices.csv`、`robustness_month_contribution.csv`、`robustness_portfolio_behavior.csv`、`robustness_factor_regime.csv`。
+  - reports 层新增 `robustness_report.md`。
+  - `experiment_guide.md` 同步补充命令与产物说明。
+- 目的：
+  - 在不改变基金池、评分、组合和回测逻辑的前提下，验证候选评分体系的收益是否集中于少数阶段、少数月份或更激进的组合行为。
+
+### 39. 修正新观察层字段进入评分体系时的方向映射
+
+- 变更内容：
+  - 在 [`scoring_engine.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/ranking/scoring_engine.py) 中补齐 `excess_hit_rate_12m`、`asset_flow_volatility_12m` 等新字段的方向定义。
+  - 增补对应回归测试，避免候选配置中引用新字段时被错误按默认高值方向处理。
+- 目的：
+  - 防止 `v3` 这类实验配置在接入新观察层因子后，因方向表缺失而得到错误评分结果。
