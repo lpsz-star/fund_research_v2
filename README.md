@@ -106,7 +106,7 @@
 - [data_dictionary.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_dictionary.md)：字段级数据字典、单位和缺失语义
 - [time_boundary_audit.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)：哪些字段能解释历史月份，哪些字段只代表最新快照
 - [strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)：当前策略范围与研究口径
-- [factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)：当前已实现因子、合成分与评分逻辑
+- [factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)：因子字典、评分体系权重、各因子使用位置总览
 - [backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)：信号时点、执行时点、成本与回测边界
 - [experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)：实验运行、结果阅读、可比性判断
 - [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
@@ -159,15 +159,20 @@
 
 这一步的目的不是重新计算策略，而是直接回答“这次结果为什么和上次不一样”，并把配置变化、样本变化、类型基线变化、回测变化和组合变化写成标准审计产物。
 
-当前还新增了一条“评分体系候选版”实验配置：
+当前除了默认基线配置，还保留两条候选评分体系配置：
 
 - [`configs/tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+- [`configs/tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
 
-它的用途不是替代默认配置，而是：
+它们的用途不是替代默认配置，而是：
 
 - 根据因子评价结果重构评分体系
 - 作为候选 baseline 做对照实验
 - 观察收益改善是否伴随波动、回撤和换仓恶化
+
+如果你想快速回答“每个因子是什么意思”“默认、`v2`、`v3` 分别用了哪些因子和权重”，直接看：
+
+- [docs/factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
 
 ## 4. 当前目录结构
 
