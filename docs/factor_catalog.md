@@ -1,490 +1,421 @@
 # 因子目录
 
-本文档记录当前版本已经落地到生产代码中的特征、评分因子与合成口径。
-目标是让协作者能够直接回答三个问题：
+本文档只回答两个问题：
 
-- 当前到底算了哪些因子
 - 每个因子在金融上是什么意思
-- 这些因子如何进入最终评分
+- 每个评分体系对应的因子和权重
 
-本文档只描述当前代码真实存在的字段，不描述尚未实现的设想。
+本文档以当前代码真实实现为准，主要对应以下位置：
 
-当前完整实验还会额外输出一份因子评估报告：
+- 特征构建：[feature_builder.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/features/feature_builder.py)
+- 评分方向与横截面打分：[scoring_engine.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/ranking/scoring_engine.py)
+- 默认评分体系回退配置：[config.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/config.py)
+- 实验配置：
+  - [`tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
+  - [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+  - [`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
 
-- `factor_evaluation.json`
-- `factor_evaluation.csv`
-- `factor_evaluation_report.md`
+## 1. 当前口径
 
-它们用于回答“这些因子在下一月收益上是否真的有区分度”，不直接改变当前评分或回测口径。
+- 资产范围：中国市场场外公募主动权益基金。
+- 当前基金类型：`主动股票`、`偏股混合`、`灵活配置混合`。
+- 频率：月频。
+- 时间边界：所有特征都只使用“截至当月末已可见”的历史数据，不使用未来月份信息。
+- 评分方法：同月横截面分位打分，再按权重合成三大类分数和总分。
+- 评分方向：
+  - `high` 表示数值越大越好。
+  - `low` 表示数值越小越好。
+- 缺失值处理：
+  - 评分时，单字段若缺失，会给该基金该字段中性分 `0.5`。
+  - 这主要是为了避免事件类因子因为“没有事件”而被机械奖惩。
 
-## 1. 适用范围
+## 2. 因子字典
 
-当前因子体系服务于：
+下面只列当前代码中真实产出的、并且已经被评分系统使用或进入观察层的字段。
 
-- 资产范围：中国市场场外公募主动权益基金
-- 当前纳入基金类型：
-  - `主动股票`
-  - `偏股混合`
-  - `灵活配置混合`
-- 调仓频率：月频
-- 信号时点：最后一个完整自然月的月末
-- 执行时点：下一月
+### 2.1 收益与超额类
 
-注意：
+#### `ret_3m`
 
-- 因子虽按 `month` 月频落盘，但正式研究只使用 `as_of_date` 之前最后一个完整月作为“最新信号月”
-- 尚未走完的当月若已经有部分净值或规模记录，只能用于观察，不直接进入正式组合建议
+- 含义：截至当前月的近 `3` 个月复利累计收益。
+- 计算方式：对近 `3` 个月 `return_1m` 做复利连乘。
+- 金融语义：短期动量，反映最近一个季度表现是否强。
+- 评分方向：`high`
+- 当前状态：已实现；当前三个评分体系都未使用。
 
-相关实现：
+#### `ret_6m`
 
-- 特征计算：[feature_builder.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/features/feature_builder.py)
-- 横截面评分：[scoring_engine.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/ranking/scoring_engine.py)
+- 含义：截至当前月的近 `6` 个月复利累计收益。
+- 计算方式：对近 `6` 个月 `return_1m` 做复利连乘。
+- 金融语义：中短期趋势，比 `ret_3m` 更平滑。
+- 评分方向：`high`
+- 当前状态：基线评分体系使用。
 
-## 2. 总体结构
+#### `ret_12m`
 
-当前评分分成三大类：
+- 含义：截至当前月的近 `12` 个月复利累计收益。
+- 计算方式：对近 `12` 个月 `return_1m` 做复利连乘。
+- 金融语义：过去一年总收益，是最基础的历史表现刻画。
+- 评分方向：`high`
+- 当前状态：基线、`v2`、`v3` 都使用。
 
-1. 收益质量 `performance_quality`
-2. 风险控制 `risk_control`
-3. 稳定性质量 `stability_quality`
+#### `excess_ret_3m`
 
-最终总分 `total_score` 是三类因子分的加权和，默认权重来自 [`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)：
+- 含义：截至当前月的近 `3` 个月累计超额收益。
+- 计算方式：`ret_3m - benchmark_3m_return`。
+- 金融语义：回答“最近一个季度是否跑赢对应 benchmark”。
+- 评分方向：`high`
+- 当前状态：已实现；当前三个评分体系都未使用。
 
-- `performance_quality`: `0.45`
-- `risk_control`: `0.35`
-- `stability_quality`: `0.20`
+#### `excess_ret_6m`
 
-评分方法不是绝对值打分，而是“同月横截面分位映射”：
+- 含义：截至当前月的近 `6` 个月累计超额收益。
+- 计算方式：`ret_6m - benchmark_6m_return`。
+- 金融语义：回答“最近半年是否跑赢对应 benchmark”。
+- 评分方向：`high`
+- 当前状态：已实现；当前三个评分体系都未使用。
 
-- 每个月只在当月可投基金之间比较
-- 每个字段先按排序位置映射到 `0 ~ 1`
-- 再在类别内加权合成
+#### `excess_ret_12m`
 
-这样做的目的，是先固定一个可解释、可追踪、对异常值不太敏感的基础评分口径。
-
-当前评分引擎已经支持把三大类内部因子集合配置化，而不再完全写死在代码里：
-
-- 默认基线配置：[`tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
-- 候选优化配置：[`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
-
-这意味着：
-
-- 新因子可以先进入观察层
-- 评分体系优化可以通过新配置做对照实验
-- 不必直接覆盖旧 baseline
-
-## 3. 原子特征
-
-### 3.1 `ret_3m`
-
-- 含义：截至当前月的近 `3` 个月复利累计收益
-- 计算方式：
-  - 使用月收益 `return_1m`
-  - 对窗口内收益做复利连乘
-- 金融语义：
-  - 反映基金近期短期动量
-- 风险提示：
-  - 对短期风格切换比较敏感
-
-### 3.2 `ret_6m`
-
-- 含义：截至当前月的近 `6` 个月复利累计收益
-- 计算方式：
-  - 使用月收益 `return_1m`
-  - 对窗口内收益做复利连乘
-- 金融语义：
-  - 比 `ret_3m` 更平滑，兼顾趋势与阶段性表现
-
-### 3.3 `ret_12m`
-
-- 含义：截至当前月的近 `12` 个月复利累计收益
-- 计算方式：
-  - 使用月收益 `return_1m`
-  - 对窗口内收益做复利连乘
-- 金融语义：
-  - 反映基金过去一年的整体收益表现
-- 当前用途：
-  - 是收益质量因子的核心字段
-
-### 3.4 `excess_ret_12m`
-
-- 含义：截至当前月的近 `12` 个月累计超额收益
+- 含义：截至当前月的近 `12` 个月累计超额收益。
 - 计算方式：
   - `ret_12m - benchmark_12m_return`
-- benchmark 来源：
-  - 当前改为按 `primary_type` 映射 benchmark
-  - 默认映射为：
-    - `主动股票 -> 中证800 (000906.SH)`
-    - `偏股混合 -> 沪深300 (000300.SH)`
-    - `灵活配置混合 -> 中证800 (000906.SH)`
-- 金融语义：
-  - 区分“市场整体上涨带来的收益”和“基金相对市场的主动超额”
-- 时间边界：
-  - 只使用当前月及历史月度 benchmark 收益，不引入未来信息
-- 工程说明：
-  - 若某类基金缺少专属 benchmark 序列，当前会安全回退到默认 benchmark，而不是让整条特征缺失
+  - benchmark 按 `primary_type` 映射：
+    - `主动股票 -> 中证800`
+    - `偏股混合 -> 沪深300`
+    - `灵活配置混合 -> 中证800`
+- 金融语义：把“市场整体上涨”与“基金主动跑赢市场”区分开。
+- 评分方向：`high`
+- 当前状态：基线、`v2`、`v3` 都使用。
 
-### 3.5 `vol_12m`
+#### `excess_consistency_12m`
 
-- 含义：截至当前月的近 `12` 个月收益波动率
+- 含义：不同收益窗口下超额是否同时成立的一致性指标。
+- 计算方式：基于 `excess_ret_3m`、`excess_ret_6m`、`excess_ret_12m` 聚合而成。
+- 金融语义：不只看超额幅度，还看超额是否跨窗口持续存在。
+- 评分方向：`high`
+- 当前状态：已实现；当前三个评分体系都未使用。
+
+#### `excess_hit_rate_12m`
+
+- 含义：近 `12` 个月中，基金月收益跑赢对应 benchmark 的月份占比。
+- 计算方式：逐月比较 `fund_return_1m > benchmark_return_1m` 后求占比。
+- 金融语义：衡量超额是否经常发生，而不是只在少数月份集中兑现。
+- 评分方向：`high`
+- 当前状态：观察层；`v3` 使用。
+
+#### `excess_streak_6m`
+
+- 含义：近 `6` 个月内最长连续跑赢 benchmark 的月数。
+- 计算方式：对逐月超额收益序列统计最长连续 `excess_return > 0` 段。
+- 金融语义：衡量超额的连续性和趋势延续性。
+- 评分方向：`high`
+- 当前状态：观察层；当前三个正式评分体系都未使用。
+
+### 2.2 风险与收益路径类
+
+#### `vol_12m`
+
+- 含义：截至当前月的近 `12` 个月月收益波动率。
+- 计算方式：对近 `12` 个月月收益计算总体标准差。
+- 金融语义：衡量收益路径整体波动程度。
+- 评分方向：`low`
+- 当前状态：基线评分体系使用。
+
+#### `downside_vol_12m`
+
+- 含义：截至当前月的近 `12` 个月下行波动率。
+- 计算方式：只保留负收益月份，对其平方均值开根号；若无负收益则记 `0.0`。
+- 金融语义：关注亏损月份的波动强度，比总波动更接近持有人的痛感。
+- 评分方向：`low`
+- 当前状态：基线、`v2`、`v3` 都使用。
+
+#### `max_drawdown_12m`
+
+- 含义：截至当前月的近 `12` 个月最大回撤。
+- 计算方式：基于近 `12` 个月净值路径计算历史峰值到后续低点的最大跌幅。
+- 金融语义：衡量最差历史回撤体验。
+- 评分方向：`high`
+- 说明：这里数值通常为负，越接近 `0` 越好；代码按 `high` 方向处理。
+- 当前状态：基线评分体系使用。
+
+#### `drawdown_recovery_ratio_12m`
+
+- 含义：近 `12` 个月回撤后的恢复程度。
+- 计算方式：基于净值路径的回撤与后续修复关系计算。
+- 金融语义：不是只看跌得多深，还看跌后恢复得快不快。
+- 评分方向：`high`
+- 当前状态：已实现；当前三个评分体系都未使用。
+
+#### `drawdown_duration_ratio_12m`
+
+- 含义：近 `12` 个月中净值处于历史峰值下方的月份占比。
+- 计算方式：逐月维护历史峰值，统计 `nav < running_peak` 的月份比例。
+- 金融语义：衡量回撤状态是否长期拖延。
+- 评分方向：`low`
+- 当前状态：观察层；当前三个正式评分体系都未使用。
+
+#### `months_since_drawdown_low_12m`
+
+- 含义：距离近 `12` 个月回撤低点已经过去了多少个月。
+- 计算方式：在窗口内定位回撤低点并计算至当前月的月数。
+- 金融语义：衡量基金是否已经离开最差阶段一段时间。
+- 评分方向：`high`
+- 当前状态：已实现；当前三个评分体系都未使用。
+
+#### `hit_rate_12m`
+
+- 含义：近 `12` 个月中正收益月份占比。
+- 计算方式：统计 `return_1m > 0` 的月份比例。
+- 金融语义：反映盈利月份出现得是否足够频繁。
+- 评分方向：`high`
+- 当前状态：已实现；当前三个评分体系都未使用。
+
+#### `profit_loss_ratio_12m`
+
+- 含义：近 `12` 个月平均盈利月份收益与平均亏损月份亏损绝对值之比。
+- 计算方式：`average_gain / average_loss`；若无亏损则返回较大保护值。
+- 金融语义：衡量“赚的时候赚多少、亏的时候亏多少”。
+- 评分方向：`high`
+- 当前状态：已实现；当前三个评分体系都未使用。
+
+#### `worst_3m_avg_return_12m`
+
+- 含义：近 `12` 个月中最差 `3` 个月收益的平均值。
+- 计算方式：取近 `12` 个月月收益，从低到高排序，取最差 `3` 个月做平均。
+- 金融语义：直接刻画左尾阶段的杀伤力。
+- 评分方向：`high`
+- 说明：值越高越好，表示最差几个月没那么差。
+- 当前状态：`v2`、`v3` 使用。
+
+#### `tail_loss_ratio_12m`
+
+- 含义：近 `12` 个月中最差 `2` 个月亏损，占全部亏损月亏损总和的比例。
+- 计算方式：提取负收益月的亏损绝对值，取最差 `2` 个月亏损之和除以全部亏损之和。
+- 金融语义：衡量亏损是否过度集中在少数极端月份。
+- 评分方向：`low`
+- 当前状态：观察层；当前三个正式评分体系都未使用。
+
+### 2.3 经理与运作稳定性类
+
+#### `manager_tenure_months`
+
+- 含义：当前月下基金经理任期月数。
 - 计算方式：
-  - 对窗口内月收益计算总体标准差
-- 金融语义：
-  - 衡量收益路径波动程度
-- 当前说明：
-  - 当前是月频总体波动率，尚未做年化
+  - 优先取月度经理映射里的 `manager_start_month`
+  - 若缺失则回退到实体层 `manager_start_month`
+  - 若仍缺失则回退到 `inception_month`
+- 金融语义：经理任期越长，当前业绩与现任管理团队的对应关系通常更清楚。
+- 评分方向：`high`
+- 当前状态：基线评分体系使用。
 
-### 3.6 `downside_vol_12m`
+#### `manager_change_count_24m`
 
-- 含义：截至当前月的近 `12` 个月下行波动率
+- 含义：近 `24` 个月内经理名称发生变化的次数。
+- 计算方式：基于 `manager_assignment_monthly` 比较相邻月份经理名称是否变化。
+- 金融语义：把频繁换帅视作稳定性风险代理。
+- 评分方向：`low`
+- 当前状态：观察层；当前三个正式评分体系都未使用。
+
+#### `manager_post_change_excess_delta_12m`
+
+- 含义：现任经理上任后相对上任前的超额收益均值变化。
 - 计算方式：
-  - 仅保留负收益月份
-  - 对负收益平方均值开根号
-- 金融语义：
-  - 更关注亏损波动，而不是全部波动
-- 当前说明：
-  - 如果窗口内没有负收益，记为 `0.0`
+  - 以当前经理 `manager_start_month` 为分界
+  - 分别取上任前后、截至当前月最多 `12` 个月的月度超额收益
+  - 计算 `post_mean_excess - pre_mean_excess`
+  - 若任一侧可见月份少于 `3`，则记缺失
+- 金融语义：观察换经理之后，基金相对 benchmark 的表现是否改善。
+- 评分方向：`high`
+- 当前状态：`v2`、`v3` 使用。
 
-### 3.7 `max_drawdown_12m`
+#### `manager_post_change_downside_vol_delta_12m`
 
-- 含义：截至当前月的近 `12` 个月最大回撤
-- 计算方式：
-  - 基于窗口内净值路径
-  - 用历史峰值到后续低点的最大跌幅表示
-- 金融语义：
-  - 衡量持有体验中最差的历史回撤风险
-- 当前方向：
-  - 数值越低越差，评分时按“回撤更小更好”处理
-
-### 3.8 `manager_tenure_months`
-
-- 含义：当前月下基金经理任期月数
-- 计算方式：
-  - 优先使用 `manager_assignment_monthly` 中该月匹配到的 `manager_start_month`
-  - 若月度经理映射缺失，再回退到 `fund_entity_master.manager_start_month`
-  - 若仍缺失或异常，回退到 `inception_month`
-  - 若起始月晚于当前观察月，则做安全截断，不允许出现负任期
-- 金融语义：
-  - 经理任期越长，通常代表“当前负责人的历史业绩”更具可解释性
-- 风险提示：
-  - 该字段不衡量经理能力，只衡量任职持续时间
-  - 若上游只返回单经理口径，联席经理和团队共管关系仍未完整刻画
-
-### 3.9 `asset_stability_12m`
-
-- 含义：截至当前月的近 `12` 个月规模波动幅度
-- 计算方式：
-  - `max(assets) / min(assets) - 1`
-- 金融语义：
-  - 用来刻画基金规模是否大起大落
-- 当前方向：
-  - 数值越大表示越不稳定
-  - 在评分时按“更稳定更好”反向处理
-- 当前规模口径说明：
-  - 基金实体规模按同一实体下各份额规模求和
-  - 当 `fund_nav` 缺少净资产字段时，会回退到 `fund_share × nav` 近似估算
-
-## 3A. 观察层候选因子
-
-以下因子已经进入特征层与因子评估，但当前默认不进入评分体系，只用于观察其信息增量、方向稳定性与相关性。
-
-### 3A.1 `excess_hit_rate_12m`
-
-- 含义：近 `12` 个月中，基金月收益跑赢对应 benchmark 的月份占比
-- 计算方式：
-  - 对窗口内逐月比较 `fund_return_1m > benchmark_return_1m`
-  - 统计命中比例
-- 金融语义：
-  - 回答“超额是否持续发生”，而不是只看累计超额幅度
-
-### 3A.2 `tail_loss_ratio_12m`
-
-- 含义：近 `12` 个月中最差 `2` 个月亏损，占全部亏损月亏损总和的比例
-- 计算方式：
-  - 取负收益月份的绝对亏损值
-  - 用尾部最差 `2` 个月的亏损和除以全部负收益月亏损和
-- 金融语义：
-  - 衡量亏损是否集中在少数极端月份，识别左尾风险尖锐度
-
-### 3A.3 `manager_change_count_24m`
-
-- 含义：近 `24` 个月内经理名称发生变化的次数
-- 计算方式：
-  - 基于 `manager_assignment_monthly`
-  - 比较相邻月份经理名称是否变化
-- 金融语义：
-  - 作为管理稳定性的观察代理，回答“基金是否频繁换帅”
-
-### 3A.4 `asset_growth_6m`
-
-- 含义：当前实体规模相对 `6` 个月前的增长率
-- 计算方式：
-  - `assets_t / assets_t-6 - 1`
-- 金融语义：
-  - 作为容量扩张与潜在拥挤的观察代理
-- 风险提示：
-  - 当前规模仍可能依赖 `fund_share × nav` 近似值，因此先停留在观察层更稳妥
-
-### 3A.5 `excess_streak_6m`
-
-- 含义：近 `6` 个月内最长连续跑赢 benchmark 的月数
-- 计算方式：
-  - 基于逐月超额收益序列
-  - 统计窗口内 `excess_return > 0` 的最长连续段长度
-- 金融语义：
-  - 回答“超额是否具有连续性”，而不只是累计幅度高低
-
-### 3A.6 `drawdown_duration_ratio_12m`
-
-- 含义：近 `12` 个月中净值处于历史峰值下方的月份占比
-- 计算方式：
-  - 对窗口内净值路径逐月维护历史峰值
-  - 统计 `nav < running_peak` 的月份比例
-- 金融语义：
-  - 衡量回撤是否长期拖延，补充最大回撤深度之外的持有体验信息
-
-### 3A.7 `manager_post_change_downside_vol_delta_12m`
-
-- 含义：现任经理上任后相对上任前的下行波动变化
+- 含义：现任经理上任后相对上任前的下行波动变化。
 - 计算方式：
   - 以当前经理 `manager_start_month` 为分界
   - 分别取上任前后最多 `12` 个月基金月收益
   - 计算 `post_downside_vol - pre_downside_vol`
-- 金融语义：
-  - 观察换帅后亏损月份的波动是否收敛，而不是只看平均收益是否改善
-- 风险提示：
-  - 若上任前后任一侧可见月份少于 `3`，当前记为缺失，不强行造值
+  - 若任一侧可见月份少于 `3`，则记缺失
+- 金融语义：观察换帅后亏损月份的波动是否收敛。
+- 评分方向：`low`
+- 当前状态：观察层；当前三个正式评分体系都未使用。
 
-### 3A.8 `asset_flow_volatility_12m`
+#### `asset_stability_12m`
 
-- 含义：近 `12` 个月月度规模变化率的波动率
-- 计算方式：
-  - 先计算相邻月份规模变化率 `assets_t / assets_t-1 - 1`
-  - 再对窗口内变化率计算标准差
-- 金融语义：
-  - 用于识别资金申赎是否剧烈摇摆，补充“规模水平变化”之外的资金流稳定性
-- 风险提示：
-  - 当前规模口径仍可能受估算值影响，因此先停留在观察层
-
-## 3B. 观察层候选因子当前状态
-
-以下状态基于当前真实 `tushare` 样本上的因子评估结果整理，只用于研究优先级管理，不改变默认评分体系。
-
-### 3B.1 建议继续保留观察
-
-#### `excess_hit_rate_12m`
-
-- 当前状态：保留观察
-- 是否进入默认评分：否
-- 当前判断：
-  - 在真实样本上有一定正向迹象，但分层收益不稳定。
-  - 与 `ret_12m`、`excess_ret_12m` 相关性偏高，更像已有收益/超额因子的补充视角，而不是全新信息源。
-
-#### `asset_flow_volatility_12m`
-
-- 当前状态：保留观察
-- 是否进入默认评分：否
-- 当前判断：
-  - 第二批候选中相对最有观察价值，真实样本上的区分度优于其余 3 个新因子。
-  - 但与 `asset_stability_12m` 高相关，说明它更可能是“规模稳定性”的细化版本，而不是独立 alpha 来源。
-
-### 3B.2 建议降为低优先级观察
-
-#### `tail_loss_ratio_12m`
-
-- 当前状态：低优先级观察
-- 是否进入默认评分：否
-- 当前判断：
-  - 真实样本上的方向不稳，暂未证明对下一月收益有稳定解释力。
-
-#### `manager_change_count_24m`
-
-- 当前状态：低优先级观察
-- 是否进入默认评分：否
-- 当前判断：
-  - 区分度接近噪声。
-  - 与 `manager_tenure_months` 有明显信息重叠。
+- 含义：近 `12` 个月规模波动幅度。
+- 计算方式：`max(assets) / min(assets) - 1`
+- 金融语义：衡量基金规模是否大起大落，间接反映申赎扰动和运作稳定性。
+- 评分方向：`low`
+- 说明：数值越大越不稳定。
+- 当前状态：基线、`v2` 使用。
 
 #### `asset_growth_6m`
 
-- 当前状态：低优先级观察
-- 是否进入默认评分：否
-- 当前判断：
-  - 真实样本上的方向和分层表现都不稳。
-  - 容易混入渠道、营销和市场风格热度噪声。
+- 含义：当前实体规模相对 `6` 个月前的增长率。
+- 计算方式：`assets_t / assets_t-6 - 1`
+- 金融语义：观察容量扩张与潜在拥挤程度。
+- 评分方向：`high`
+- 当前状态：观察层；当前三个正式评分体系都未使用。
 
-#### `excess_streak_6m`
+#### `asset_flow_volatility_12m`
 
-- 当前状态：低优先级观察
-- 是否进入默认评分：否
-- 当前判断：
-  - 连续超额的想法直观，但当前样本上的区分度接近噪声。
-  - 与 `excess_hit_rate_12m` 及既有收益类因子有一定重叠。
+- 含义：近 `12` 个月月度规模变化率的波动率。
+- 计算方式：
+  - 先计算相邻月份规模变化率 `assets_t / assets_t-1 - 1`
+  - 再对窗口内变化率计算标准差
+- 金融语义：衡量资金流入流出是否剧烈摇摆。
+- 评分方向：`low`
+- 当前状态：观察层；`v3` 使用。
 
-### 3B.3 建议暂缓推进
+## 3. 评分体系
 
-#### `drawdown_duration_ratio_12m`
+### 3.1 统一评分规则
 
-- 当前状态：暂缓
-- 是否进入默认评分：否
-- 当前判断：
-  - 真实样本上的方向与预期不一致，暂不支持继续推进到评分候选池。
+所有评分体系都共用同一套横截面打分机制：
 
-#### `manager_post_change_downside_vol_delta_12m`
+- 先只在当月 `is_eligible = 1` 的基金里比较。
+- 单字段先转成同月横截面分位分数 `0 ~ 1`。
+- 再按类内权重合成：
+  - `performance_quality`
+  - `risk_control`
+  - `stability_quality`
+- 最后按类间权重合成 `total_score`。
 
-- 当前状态：暂缓
-- 是否进入默认评分：否
-- 当前判断：
-  - 事件样本覆盖不足，缺失比例高，当前证据不够稳定。
-  - 该思路可以保留，但前提是后续先解决事件样本稀疏问题。
+### 3.2 基线评分体系
 
-## 4. 三类合成因子
-
-### 4.1 收益质量 `performance_quality`
-
-字段构成：
-
-- `ret_12m`
-- `ret_6m`
-- `excess_ret_12m`
-
-类内权重：
-
-- `ret_12m`: `0.5`
-- `ret_6m`: `0.3`
-- `excess_ret_12m`: `0.2`
-
-设计含义：
-
-- 以中期收益为主
-- 兼顾半年表现
-- 保留一部分相对 benchmark 的主动超额信息
-
-### 4.2 风险控制 `risk_control`
-
-字段构成：
-
-- `max_drawdown_12m`
-- `vol_12m`
-- `downside_vol_12m`
-
-类内权重：
-
-- `max_drawdown_12m`: `0.4`
-- `vol_12m`: `0.3`
-- `downside_vol_12m`: `0.3`
-
-设计含义：
-
-- 最大回撤权重最高，因为它更接近持有人的实际痛感
-- 波动率与下行波动共同描述收益路径风险
-
-### 4.3 稳定性质量 `stability_quality`
-
-字段构成：
-
-- `manager_tenure_months`
-- `asset_stability_12m`
-
-类内权重：
-
-- `manager_tenure_months`: `0.7`
-- `asset_stability_12m`: `0.3`
-
-设计含义：
-
-- 当前版本更强调经理持续性
-- 规模稳定性作为辅助约束，而不是主导因子
-
-## 4.4 `tushare_scoring_v2` 候选评分体系
-
-当前已落地一版候选评分体系配置，用于根据因子评价结果重构正式评分：
-
-- 配置文件：
-  - [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+- 真实来源：
+  - 配置文件：[`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
+  - 因子明细回退：[`config.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/config.py)
+- 说明：
+  - `tushare.json` 只显式写了类间权重。
+  - 若配置未提供 `ranking.category_factors`，代码会回退到默认评分体系。
 
 类间权重：
 
-- `performance_quality`: `0.50`
-- `risk_control`: `0.35`
-- `stability_quality`: `0.15`
+| 类别 | 权重 |
+| --- | ---: |
+| `performance_quality` | `0.45` |
+| `risk_control` | `0.35` |
+| `stability_quality` | `0.20` |
 
 类内因子：
 
-- `performance_quality`
-  - `excess_ret_12m`: `0.70`
-  - `ret_12m`: `0.30`
-- `risk_control`
-  - `downside_vol_12m`: `0.55`
-  - `worst_3m_avg_return_12m`: `0.45`
-- `stability_quality`
-  - `asset_stability_12m`: `0.70`
-  - `manager_post_change_excess_delta_12m`: `0.30`
+| 类别 | 因子 | 权重 |
+| --- | --- | ---: |
+| `performance_quality` | `ret_12m` | `0.50` |
+| `performance_quality` | `ret_6m` | `0.30` |
+| `performance_quality` | `excess_ret_12m` | `0.20` |
+| `risk_control` | `max_drawdown_12m` | `0.40` |
+| `risk_control` | `vol_12m` | `0.30` |
+| `risk_control` | `downside_vol_12m` | `0.30` |
+| `stability_quality` | `manager_tenure_months` | `0.70` |
+| `stability_quality` | `asset_stability_12m` | `0.30` |
 
-设计意图：
+设计特点：
 
-- 收益侧减少对 `ret_6m` 的依赖，转而更强调 `excess_ret_12m`
-- 风险侧减少对 `vol_12m` 与 `max_drawdown_12m` 的直接依赖，转而更强调下行风险和极端阶段韧性
-- 稳定性侧弱化 `manager_tenure_months`，改为把经理变更事件后的表现作为弱权重试验项
+- 收益侧以绝对收益为主，超额收益只做辅助。
+- 风险侧用最大回撤、总波动、下行波动三件套。
+- 稳定性侧以经理任期为主，规模稳定为辅。
 
-当前状态：
+### 3.3 `tushare_scoring_v2`
 
-- `v2` 已在真实 `tushare` 数据上完整跑通
-- 当前结果显示回测收益明显改善，但波动也明显抬升
-
-## 4.5 `tushare_scoring_v3` 候选评分体系
-
-当前新增一版更激进的候选评分配置，用于把“保留观察”的新因子正式纳入对照实验：
-
-- 配置文件：
-  - [`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
+- 配置文件：[`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
 
 类间权重：
 
-- `performance_quality`: `0.50`
-- `risk_control`: `0.35`
-- `stability_quality`: `0.15`
+| 类别 | 权重 |
+| --- | ---: |
+| `performance_quality` | `0.50` |
+| `risk_control` | `0.35` |
+| `stability_quality` | `0.15` |
 
 类内因子：
 
-- `performance_quality`
-  - `excess_ret_12m`: `0.55`
-  - `ret_12m`: `0.15`
-  - `excess_hit_rate_12m`: `0.30`
-- `risk_control`
-  - `downside_vol_12m`: `0.55`
-  - `worst_3m_avg_return_12m`: `0.45`
-- `stability_quality`
-  - `asset_flow_volatility_12m`: `0.80`
-  - `manager_post_change_excess_delta_12m`: `0.20`
+| 类别 | 因子 | 权重 |
+| --- | --- | ---: |
+| `performance_quality` | `excess_ret_12m` | `0.70` |
+| `performance_quality` | `ret_12m` | `0.30` |
+| `risk_control` | `downside_vol_12m` | `0.55` |
+| `risk_control` | `worst_3m_avg_return_12m` | `0.45` |
+| `stability_quality` | `asset_stability_12m` | `0.70` |
+| `stability_quality` | `manager_post_change_excess_delta_12m` | `0.30` |
 
-设计意图：
+设计特点：
 
-- 收益侧在保留 `excess_ret_12m` 主导地位的前提下，引入 `excess_hit_rate_12m` 观察“跑赢是否持续发生”
-- 风险侧延续 `v2` 的下行风险和极端阶段韧性组合
-- 稳定性侧用 `asset_flow_volatility_12m` 替换 `asset_stability_12m`，测试资金流波动能否提供更直接的稳定性信息
+- 收益侧从“绝对收益主导”切到“超额收益主导”。
+- 风险侧弱化总波动与最大回撤，改看下行风险和左尾阶段损伤。
+- 稳定性侧弱化经理任期，加入经理变更事件后的表现改善因子。
 
-当前状态：
+### 3.4 `tushare_scoring_v3`
 
-- `v3` 已在真实 `tushare` 数据上完成首轮验证
-- 相比 baseline 仍有明显提升，但目前尚未优于上一版 `v2`
-- 因此它应被视为“候选 baseline”，而不是已经确认的最终正式评分体系
+- 配置文件：[`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
 
-## 5. 横截面评分口径
+类间权重：
 
-每个月评分时，只对当月 `is_eligible = 1` 的基金进行排序。
+| 类别 | 权重 |
+| --- | ---: |
+| `performance_quality` | `0.50` |
+| `risk_control` | `0.35` |
+| `stability_quality` | `0.15` |
 
-基本规则：
+类内因子：
 
-- 同月比较，不跨月混排
-- 默认数值越大越好
-- 风险类字段按反向排序
-- `asset_stability_12m` 也按反向排序，因为波动越大越差
-- 若某个事件类因子在该基金上没有观测值，例如 `manager_post_change_excess_delta_12m`，当前按中性分 `0.5` 处理
+| 类别 | 因子 | 权重 |
+| --- | --- | ---: |
+| `performance_quality` | `excess_ret_12m` | `0.55` |
+| `performance_quality` | `ret_12m` | `0.15` |
+| `performance_quality` | `excess_hit_rate_12m` | `0.30` |
+| `risk_control` | `downside_vol_12m` | `0.55` |
+| `risk_control` | `worst_3m_avg_return_12m` | `0.45` |
+| `stability_quality` | `asset_flow_volatility_12m` | `0.80` |
+| `stability_quality` | `manager_post_change_excess_delta_12m` | `0.20` |
 
-分位映射方式：
+设计特点：
 
-- 若当月有 `N` 只基金
-- 排名第一得分接近 `1`
-- 排名最后得分接近 `0`
-- 若当月只有 `1` 只基金，则该字段得分记为 `1.0`
+- 收益侧在 `v2` 基础上加入 `excess_hit_rate_12m`，补充“超额是否持续发生”。
+- 风险侧延续 `v2` 的下行风险和左尾韧性组合。
+- 稳定性侧用 `asset_flow_volatility_12m` 替代 `asset_stability_12m`，测试更直接的资金流波动约束。
+
+## 4. 因子使用总览
+
+下面这张表用于快速回答“某个因子到底在哪套体系里被用到了”。
+
+| 因子 | 基线 | `v2` | `v3` | 观察层 |
+| --- | --- | --- | --- | --- |
+| `ret_3m` |  |  |  |  |
+| `ret_6m` | `Y` |  |  |  |
+| `ret_12m` | `Y` | `Y` | `Y` |  |
+| `excess_ret_3m` |  |  |  |  |
+| `excess_ret_6m` |  |  |  |  |
+| `excess_ret_12m` | `Y` | `Y` | `Y` |  |
+| `excess_consistency_12m` |  |  |  |  |
+| `excess_hit_rate_12m` |  |  | `Y` | `Y` |
+| `excess_streak_6m` |  |  |  | `Y` |
+| `vol_12m` | `Y` |  |  |  |
+| `downside_vol_12m` | `Y` | `Y` | `Y` |  |
+| `max_drawdown_12m` | `Y` |  |  |  |
+| `drawdown_recovery_ratio_12m` |  |  |  |  |
+| `drawdown_duration_ratio_12m` |  |  |  | `Y` |
+| `months_since_drawdown_low_12m` |  |  |  |  |
+| `hit_rate_12m` |  |  |  |  |
+| `profit_loss_ratio_12m` |  |  |  |  |
+| `worst_3m_avg_return_12m` |  | `Y` | `Y` |  |
+| `tail_loss_ratio_12m` |  |  |  | `Y` |
+| `manager_tenure_months` | `Y` |  |  |  |
+| `manager_change_count_24m` |  |  |  | `Y` |
+| `manager_post_change_excess_delta_12m` |  | `Y` | `Y` |  |
+| `manager_post_change_downside_vol_delta_12m` |  |  |  | `Y` |
+| `asset_stability_12m` | `Y` | `Y` |  |  |
+| `asset_growth_6m` |  |  |  | `Y` |
+| `asset_flow_volatility_12m` |  |  | `Y` | `Y` |
+
+## 5. 非评分辅助字段
+
+以下字段会出现在特征层或调试分析中，但不应当被理解为评分因子：
+
+### `manager_post_change_observation_months`
+
+- 含义：当前经理上任后，事件类因子可见的后验观察月数。
+- 作用：辅助判断 `manager_post_change_excess_delta_12m` 是否因为样本太短而缺失。
+- 当前状态：诊断字段，不参与评分。
