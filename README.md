@@ -87,8 +87,12 @@
 7. [docs/factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
 8. [docs/backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
 9. [docs/experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
-10. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
-11. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
+10. [docs/robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
+11. [docs/baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
+12. [docs/v2_baseline_review_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)
+13. [docs/v2_min_validation_plan_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_min_validation_plan_2026-03-24.md)
+14. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
+15. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
 
 这些文档分别覆盖：
 
@@ -109,6 +113,10 @@
 - [factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)：因子字典、评分体系权重、各因子使用位置总览
 - [backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)：信号时点、执行时点、成本与回测边界
 - [experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)：实验运行、结果阅读、可比性判断
+- [robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)：候选评分稳健性分析的逻辑、flag 定义与使用边界
+- [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)：候选评分是否升级为默认 baseline 的决策清单
+- [v2_baseline_review_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)：`tushare_scoring_v2` 是否升级 baseline 的正式评审记录
+- [v2_min_validation_plan_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_min_validation_plan_2026-03-24.md)：`v2` 下一轮最小验证任务的实施计划
 - [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
 - [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)：主线迭代的变更记录
 

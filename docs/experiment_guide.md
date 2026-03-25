@@ -59,6 +59,8 @@ make compare-tushare
 ```
 
 它默认比较同一数据源最近两次完整实验记录，并输出标准差异报告，而不是要求人工逐项翻历史文件。
+当 `run-experiment` 成功写入新的实验记录后，系统现在也会自动刷新一次当前数据源的 `comparison_report.md` 与对应 diff 产物，
+避免实验登记已经前进，但对比报告仍停在旧一轮。
 
 当前标准稳健性验证命令：
 
@@ -67,6 +69,12 @@ PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/t
 ```
 
 这条命令不会修改策略、评分、回测逻辑，只会基于当前候选配置和默认 baseline 重做分析并输出稳健性诊断产物。
+
+如果你需要理解这一步到底在检查什么、四个 flag 分别代表什么、它和正式回测报告的边界在哪里，请同时阅读：
+
+- [robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
+- [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
+- [v2_baseline_review_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)
 
 ## 3. 一次完整实验会产出什么
 
@@ -129,6 +137,7 @@ PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/t
 - [`robustness_portfolio_behavior.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_portfolio_behavior.csv)
 - [`robustness_factor_regime.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_factor_regime.csv)
 - [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/robustness_report.md)
+- [`robustness_analysis.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
 
 ## 4. 如何判断两次实验是否可比
 
@@ -221,6 +230,12 @@ make compare-tushare
 - [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/comparison_report.md)
 - [`portfolio_diff.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/portfolio_diff.csv)
 - [`backtest_summary_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/backtest_summary_diff.json)
+
+阅读 `comparison_report.md` 时还需要注意：
+
+- 它只表示 `experiment_registry.jsonl` 中最近两次完整实验记录的差异
+- 报告开头的 `previous/current` 和 `*_generated_at` 才是实际被比较的实验对象
+- 若你需要讨论某个特定候选配置是否升级 baseline，不应只凭文件名判断，必须先核对比较对象是否就是那一对实验
 
 如果比较的是默认评分和 `tushare_scoring_v2`：
 

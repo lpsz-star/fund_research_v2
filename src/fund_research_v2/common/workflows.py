@@ -59,17 +59,7 @@ def compare_experiments_command(config_path: Path) -> None:
     config = load_config(config_path)
     project_root = resolve_project_root(config_path)
     ensure_directories(all_artifact_dirs(config, project_root))
-    experiment_dir = artifact_dir(config, project_root, config.paths.experiment_dir)
-    result_dir = artifact_dir(config, project_root, config.paths.result_dir)
-    report_dir = artifact_dir(config, project_root, config.paths.report_dir)
-    records = read_experiment_records(experiment_dir / "experiment_registry.jsonl")
-    hydrated_records = _hydrate_portfolio_summary(records)
-    comparison = build_experiment_comparison(hydrated_records)
-    write_json(result_dir / "comparison_summary.json", comparison.get("summary", {}))
-    write_json(result_dir / "backtest_summary_diff.json", comparison.get("backtest_summary_diff", {}))
-    write_json(result_dir / "type_baseline_diff.json", comparison.get("type_baseline_diff", {}))
-    write_csv(result_dir / "portfolio_diff.csv", comparison.get("portfolio_diff_rows", []))
-    render_comparison_report(report_dir / "comparison_report.md", comparison)
+    _refresh_latest_comparison_outputs(config, project_root)
 
 
 def analyze_robustness_command(config_path: Path) -> None:
@@ -289,6 +279,7 @@ def write_full_outputs(
     write_json(result_dir / "type_baseline_snapshot.json", type_baseline)
     experiment_record = build_experiment_record(config, project_root, dataset.metadata, backtest_summary, portfolio_rows, type_baseline, factor_evaluation)
     append_jsonl(artifact_dir(config, project_root, config.paths.experiment_dir) / "experiment_registry.jsonl", experiment_record)
+    _refresh_latest_comparison_outputs(config, project_root)
     render_backtest_report(artifact_dir(config, project_root, config.paths.report_dir) / "backtest_report.md", backtest_rows, backtest_summary)
     render_factor_evaluation_report(artifact_dir(config, project_root, config.paths.report_dir) / "factor_evaluation_report.md", factor_evaluation)
     render_experiment_report(
@@ -300,6 +291,23 @@ def write_full_outputs(
         backtest_rows=backtest_rows,
         backtest_summary=backtest_summary,
     )
+
+
+def _refresh_latest_comparison_outputs(config: AppConfig, project_root: Path) -> None:
+    """把最近两次完整实验的差异产物刷新到当前数据源的 comparison 文件。"""
+    experiment_dir = artifact_dir(config, project_root, config.paths.experiment_dir)
+    result_dir = artifact_dir(config, project_root, config.paths.result_dir)
+    report_dir = artifact_dir(config, project_root, config.paths.report_dir)
+    records = read_experiment_records(experiment_dir / "experiment_registry.jsonl")
+    if len(records) < 2:
+        return
+    hydrated_records = _hydrate_portfolio_summary(records)
+    comparison = build_experiment_comparison(hydrated_records)
+    write_json(result_dir / "comparison_summary.json", comparison.get("summary", {}))
+    write_json(result_dir / "backtest_summary_diff.json", comparison.get("backtest_summary_diff", {}))
+    write_json(result_dir / "type_baseline_diff.json", comparison.get("type_baseline_diff", {}))
+    write_csv(result_dir / "portfolio_diff.csv", comparison.get("portfolio_diff_rows", []))
+    render_comparison_report(report_dir / "comparison_report.md", comparison)
 
 
 def write_portfolio_outputs(

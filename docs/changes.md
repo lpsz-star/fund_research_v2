@@ -2,6 +2,54 @@
 
 本文档按主题记录已经落地的主要改动，重点说明“改了什么”以及“为什么改”。
 
+## 2026-03-24
+
+### 0. 修复 `comparison_report` 容易陈旧的问题
+
+- 变更内容：
+  - `run-experiment` 在成功写入新的实验记录后，会自动刷新当前数据源下最近两次实验的 comparison 产物。
+  - [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/comparison_report.md) 头部新增时效性说明与 `previous/current_generated_at` 字段。
+  - [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md) 补充 comparison 产物的语义边界和阅读提示。
+- 目的：
+  - 防止实验登记已经追加新记录，但 `comparison_report.md` 仍停在旧一轮。
+  - 降低协作者把单文件 comparison 报告误读为“当前最新官方对比结论”的风险。
+
+### 1. 新增候选评分稳健性分析说明文档
+
+- 变更内容：
+  - 新增 [`robustness_analysis.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)。
+  - 在 [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md) 和 [`README.md`](/Users/liupeng/.codex/projects/fund_research_v2/README.md) 中补充入口说明。
+- 目的：
+  - 把 `analyze-robustness` 的诊断逻辑、flag 含义、输出字段和使用边界讲清楚。
+  - 降低人类协作者把 `robustness_report.md` 当成“自动升级结论”的误读风险。
+
+### 2. 新增 baseline 升级决策清单
+
+- 变更内容：
+  - 新增 [`baseline_upgrade_checklist.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)。
+  - 在 [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md) 和 [`README.md`](/Users/liupeng/.codex/projects/fund_research_v2/README.md) 中补充入口说明。
+- 目的：
+  - 把“候选配置是否升级为默认 baseline”的判断标准单独沉淀成一页清单。
+  - 让评审时优先比较证据质量，而不是只盯单次收益提升。
+
+### 3. 补充 `tushare_scoring_v2` 的 baseline 升级评审记录
+
+- 变更内容：
+  - 新增 [`v2_baseline_review_2026-03-24.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)。
+  - 在 [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md) 和 [`README.md`](/Users/liupeng/.codex/projects/fund_research_v2/README.md) 中补充索引。
+- 目的：
+  - 把这次关于 `v2` 是否升级 baseline 的讨论沉淀成正式记录。
+  - 避免后续重复回忆口头结论，或把“主候选基线”误读为“已升级默认 baseline”。
+
+### 4. 新增 `v2` 最小验证实施计划
+
+- 变更内容：
+  - 新增 [`v2_min_validation_plan_2026-03-24.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_min_validation_plan_2026-03-24.md)。
+  - 在 [`README.md`](/Users/liupeng/.codex/projects/fund_research_v2/README.md) 中补充索引。
+- 目的：
+  - 把“`v2` 还差哪一步证据”进一步收敛成最小实施计划。
+  - 避免后续验证重新发散成无边界的策略优化讨论。
+
 ## 2026-03-19
 
 ### 1. 修复 `sample` / `tushare` 缓存串仓
