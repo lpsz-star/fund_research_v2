@@ -61,7 +61,7 @@
     },
     "primary_type_map": {
       "主动股票": "broad_equity",
-      "偏股混合": "large_cap_equity",
+      "偏股混合": "broad_equity",
       "灵活配置混合": "broad_equity"
     }
   },

@@ -1,6 +1,6 @@
 {
   "as_of_date": "2026-03-01",
-  "data_source": "sample",
+  "data_source": "tushare",
   "lookback_months": 48,
   "local_secret_path": "configs/local.json",
   "universe": {
@@ -12,9 +12,22 @@
   "ranking": {
     "candidate_count": 12,
     "factor_weights": {
-      "performance_quality": 0.45,
+      "performance_quality": 0.5,
       "risk_control": 0.35,
-      "stability_quality": 0.20
+      "stability_quality": 0.15
+    },
+    "category_factors": {
+      "performance_quality": {
+        "excess_ret_12m": 0.7,
+        "ret_12m": 0.3
+      },
+      "risk_control": {
+        "downside_vol_12m": 0.55,
+        "worst_3m_avg_return_12m": 0.45
+      },
+      "stability_quality": {
+        "asset_stability_12m": 1.0
+      }
     }
   },
   "portfolio": {
@@ -32,16 +45,16 @@
     "missing_weight_warning_threshold": 0.05
   },
   "benchmark": {
-    "source": "sample",
+    "source": "tushare_index",
     "default_key": "broad_equity",
     "series": {
       "broad_equity": {
-        "ts_code": null,
-        "name": "中证800样例基准"
+        "ts_code": "000906.SH",
+        "name": "中证800"
       },
       "large_cap_equity": {
-        "ts_code": null,
-        "name": "沪深300样例基准"
+        "ts_code": "000300.SH",
+        "name": "沪深300"
       }
     },
     "primary_type_map": {
@@ -56,12 +69,12 @@
   "tushare": {
     "fund_market": "O",
     "fund_status": "L",
-    "download_enabled": false,
+    "download_enabled": true,
     "use_cached_raw": true,
-    "start_date": "20180101",
+    "start_date": "20200101",
     "end_date": null,
-    "max_funds": 200,
-    "request_retry_count": 0,
+    "max_funds": 1000,
+    "request_retry_count": 2,
     "request_pause_ms": 0,
     "progress_every_entities": 10
   },

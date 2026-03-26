@@ -2,7 +2,41 @@
 
 本文档按主题记录已经落地的主要改动，重点说明“改了什么”以及“为什么改”。
 
+## 2026-03-26
+
+### 0. 将 `tushare_scoring_v2_lite` 提升为当前主候选评分体系
+
+- 变更内容：
+  - 新增 [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)。
+  - 新增 [`v2_lite_baseline_review_2026-03-26.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-26.md)。
+  - `README.md` 中将 `v2-lite` 标记为当前主候选，旧 `v2` 降为历史参考候选。
+  - 候选补证文案去掉了对固定名称 `v2` 的硬编码，避免 `v2-lite` 报告误导。
+- 目的：
+  - 在当前真实样本与中证800 benchmark 口径下，验证删除 `manager_post_change_excess_delta_12m` 后的候选是否更优。
+  - 把当前最值得继续跟踪的候选从旧 `v2` 收敛到更干净的 `v2-lite`。
+
 ## 2026-03-24
+
+### -2. 把偏股混合的默认 benchmark 映射从沪深300切回中证800
+
+- 变更内容：
+  - `tushare`、`tushare_scoring_v2`、`tushare_scoring_v3` 与 `default` 配置中，`偏股混合` 的 `benchmark.primary_type_map` 从 `large_cap_equity` 调整为 `broad_equity`。
+  - `README.md`、`factor_catalog.md` 与 `data_dictionary.md` 中同步更新默认映射说明。
+- 目的：
+  - 基于现有真实样本下近 36 个月日频贴近度旁路结果，降低把大多数 `偏股混合` 统一映射到沪深300带来的风格错配。
+  - 先把 `偏股混合` 的默认 benchmark 调整为更中性的中证800，再为后续 300/800 动态二分映射预留空间。
+
+### -1. 新增候选 baseline 补证命令与独立产物目录
+
+- 变更内容：
+  - 新增 `validate-baseline-candidate` CLI 命令与 `make validate-tushare-v2` 入口。
+  - 新增 [`candidate_validation_spec.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)。
+  - 新增 `src/fund_research_v2/evaluation/candidate_validation.py` 与 `src/fund_research_v2/reporting/candidate_validation_reports.py`。
+  - A/B 两项补证产物统一写入 `outputs/<data_source>/candidate_validation/`。
+  - `.gitignore` 明确忽略 `outputs/*/candidate_validation/`。
+- 目的：
+  - 把“风格/阶段集中性”和“beta vs selection 归因”变成标准 CLI 产物，而不是临时分析。
+  - 让 A/B 补证和常规 `result/`、`reports/` 产物分层，降低协作时的阅读混淆。
 
 ### 0. 修复 `comparison_report` 容易陈旧的问题
 
@@ -35,10 +69,10 @@
 ### 3. 补充 `tushare_scoring_v2` 的 baseline 升级评审记录
 
 - 变更内容：
-  - 新增 [`v2_baseline_review_2026-03-24.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)。
+  - 新增 [`v2_baseline_review_2026-03-25.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-25.md)。
   - 在 [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md) 和 [`README.md`](/Users/liupeng/.codex/projects/fund_research_v2/README.md) 中补充索引。
 - 目的：
-  - 把这次关于 `v2` 是否升级 baseline 的讨论沉淀成正式记录。
+  - 把这次关于 `v2` 是否升级 baseline 的讨论按中证800新口径沉淀成正式记录。
   - 避免后续重复回忆口头结论，或把“主候选基线”误读为“已升级默认 baseline”。
 
 ### 4. 新增 `v2` 最小验证实施计划

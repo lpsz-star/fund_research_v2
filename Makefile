@@ -13,6 +13,7 @@ help:
 	"  make fetch-failed-tushare 仅重抓上次失败的 tushare 份额接口缓存" \
 	"  make compare-sample       对比 sample 最近两次完整实验" \
 	"  make compare-tushare      对比 tushare 最近两次完整实验" \
+	"  make validate-tushare-v2  对 tushare_scoring_v2 执行 A/B 候选基线验证" \
 	"  make universe-sample      构建 sample 基金池" \
 	"  make universe-tushare     构建 tushare 基金池" \
 	"  make features-sample      计算 sample 特征" \
@@ -51,6 +52,10 @@ compare-sample:
 .PHONY: compare-tushare
 compare-tushare:
 	$(PYTHON) $(APP) compare-experiments --config $(TUSHARE_CONFIG)
+
+.PHONY: validate-tushare-v2
+validate-tushare-v2:
+	$(PYTHON) $(APP) validate-baseline-candidate --config configs/tushare_scoring_v2.json
 
 .PHONY: universe-sample
 universe-sample:

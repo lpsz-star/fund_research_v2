@@ -10,6 +10,7 @@
 建议与以下文档配合阅读：
 
 - [`robustness_analysis.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
+- [`candidate_validation_spec.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
 - [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
 - [`strategy_spec_v1.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)
 
@@ -74,6 +75,7 @@
 - `dataset_snapshot.json`
 - `comparison_report.md`
 - `robustness_summary.json`
+- `candidate_validation_summary.json`
 - `factor_evaluation.json`
 
 ## 4. 四道硬门槛
@@ -98,7 +100,7 @@
 
 若这些条件不成立，优先视为“新口径实验”，而不是 baseline 升级证据。
 
-### 4.2 风险恶化必须可接受
+### 4.2 风险恶化必须可解释且可接受
 
 不能只看累计收益，还必须同时看：
 
@@ -106,38 +108,52 @@
 - 最大回撤
 - 平均换手
 - 组合集中度
+- 候选补证中的收益归因结果
+- 候选补证中的不利 regime 表现
 
 建议问题：
 
 - 候选收益提升是否只是伴随显著更高波动
 - 候选回撤是否明显恶化
 - 候选是否通过更高换仓频率“买”到了收益
+- 候选的风险抬升是否主要由更高 beta / benchmark 暴露解释
+- 候选在不利 regime 下是否出现明显失效
 
 经验判断：
 
-- 如果收益提升明显，但波动和换仓同步明显抬升，通常只能判为“保留为主候选基线”
-- 只有在风险恶化有限，或风险调整后仍明显更优时，才适合进入“升级为 baseline”讨论
+- 如果收益提升明显，但波动和换仓同步明显抬升，且收益改善主要由 beta 驱动，则通常只能判为“保留为主候选基线”
+- 如果波动有所抬升，但收益改善主要来自 selection，且候选在不利 regime 下没有明显失效，则仍可进入“升级为 baseline”讨论
 
-### 4.3 稳健性红旗不能过多
+### 4.3 稳健性结构必须站得住
 
 至少检查：
 
-- `time_slice_consistency_flag`
+- `selection_dominant`
+- `window_concentrated`
+- 不利 regime 是否明显失效
 - `return_concentration_flag`
+- `factor_stability_flag`
+
+当前建议门槛分成“硬门槛”和“参考项”。
+
+硬门槛：
+
+- `selection_dominant = 是`
+- `window_concentrated = 否`
+- 不利 regime 明显失效 = 否
+- `return_concentration_flag = 0`
+
+参考项：
+
+- `time_slice_consistency_flag`
 - `turnover_risk_flag`
 - `factor_stability_flag`
 - `overall_assessment`
 
-当前建议门槛：
+说明：
 
-- `overall_assessment = keep_candidate`
-- 且 `return_concentration_flag = 0`
-
-若 `overall_assessment = needs_more_validation`，默认结论应是：
-
-- 不直接升级 baseline
-
-例外情况只能在人工复核后成立，而且必须写明原因。
+- 旧的 `time_slice_consistency_flag` 与 `overall_assessment` 仍然有参考价值，但不再作为一票否决 gate。
+- 若候选已经完成 A/B 补证，并能证明“selection 主导 + 非单窗口集中 + 不利 regime 不明显失效”，则即便旧的自然年切片 gate 未通过，也可进入人工升级讨论。
 
 ### 4.4 评分逻辑必须比旧 baseline 更干净
 
@@ -163,8 +179,8 @@
 评审时建议按下面四项给出结论：
 
 - 收益真实性：`通过 / 存疑 / 不通过`
-- 风险可接受性：`通过 / 存疑 / 不通过`
-- 稳健性诊断：`通过 / 存疑 / 不通过`
+- 风险解释充分性：`通过 / 存疑 / 不通过`
+- 稳健性结构：`通过 / 存疑 / 不通过`
 - 逻辑可解释性：`通过 / 存疑 / 不通过`
 
 推荐决策规则：

@@ -49,7 +49,7 @@
 当前默认 benchmark 口径为：
 
 - `主动股票 -> 中证800 (000906.SH)`
-- `偏股混合 -> 沪深300 (000300.SH)`
+- `偏股混合 -> 中证800 (000906.SH)`
 - `灵活配置混合 -> 中证800 (000906.SH)`
 - 若某类基金缺少专属 benchmark 序列，则回退到默认 benchmark
 
@@ -91,8 +91,9 @@
 11. [docs/baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
 12. [docs/v2_baseline_review_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)
 13. [docs/v2_min_validation_plan_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_min_validation_plan_2026-03-24.md)
-14. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
-15. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
+14. [docs/candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
+15. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
+16. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
 
 这些文档分别覆盖：
 
@@ -115,8 +116,10 @@
 - [experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)：实验运行、结果阅读、可比性判断
 - [robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)：候选评分稳健性分析的逻辑、flag 定义与使用边界
 - [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)：候选评分是否升级为默认 baseline 的决策清单
-- [v2_baseline_review_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)：`tushare_scoring_v2` 是否升级 baseline 的正式评审记录
+- [v2_baseline_review_2026-03-25.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-25.md)：旧 `tushare_scoring_v2` 在中证800口径下的正式评审记录
+- [v2_lite_baseline_review_2026-03-26.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-26.md)：当前主候选 `tushare_scoring_v2_lite` 是否升级 baseline 的正式评审记录
 - [v2_min_validation_plan_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_min_validation_plan_2026-03-24.md)：`v2` 下一轮最小验证任务的实施计划
+- [candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)：A/B 两项候选基线验证的输出契约与当前决策规则
 - [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
 - [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)：主线迭代的变更记录
 
@@ -160,16 +163,10 @@
 它不会重写整份 raw 快照，而是只根据上一次 `dataset_snapshot.json` 中记录的 `fetch_diagnostics.api_error_samples`，
 对失败的 `ts_code` 重新预热 `fund_manager` / `fund_nav` / `fund_share` 这类单接口缓存，降低下一次全量重跑的无效联网开销。
 
-当前还支持对比最近两次完整实验：
-
-- `make compare-sample`
-- `make compare-tushare`
-
-这一步的目的不是重新计算策略，而是直接回答“这次结果为什么和上次不一样”，并把配置变化、样本变化、类型基线变化、回测变化和组合变化写成标准审计产物。
-
-当前除了默认基线配置，还保留两条候选评分体系配置：
+当前除了默认基线配置，还保留三条候选评分体系配置：
 
 - [`configs/tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+- [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)
 - [`configs/tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
 
 它们的用途不是替代默认配置，而是：
@@ -177,6 +174,12 @@
 - 根据因子评价结果重构评分体系
 - 作为候选 baseline 做对照实验
 - 观察收益改善是否伴随波动、回撤和换仓恶化
+
+其中当前更值得继续跟踪的主候选是：
+
+- [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)
+
+原因是它在当前真实样本和中证800 benchmark 口径下，相比旧 `v2` 取得了更高收益，同时去掉了样本偏短的事件型因子 `manager_post_change_excess_delta_12m`。
 
 如果你想快速回答“每个因子是什么意思”“默认、`v2`、`v3` 分别用了哪些因子和权重”，直接看：
 

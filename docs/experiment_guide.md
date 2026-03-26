@@ -70,11 +70,24 @@ PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/t
 
 这条命令不会修改策略、评分、回测逻辑，只会基于当前候选配置和默认 baseline 重做分析并输出稳健性诊断产物。
 
+当前标准候选 baseline 补证命令：
+
+```bash
+PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config configs/tushare_scoring_v2.json
+```
+
+这条命令会把 A/B 两项补证产物写到独立目录：
+
+- `outputs/<data_source>/candidate_validation/`
+
+该目录默认用于候选基线补证产物归档，已纳入 git 忽略。
+
 如果你需要理解这一步到底在检查什么、四个 flag 分别代表什么、它和正式回测报告的边界在哪里，请同时阅读：
 
 - [robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
 - [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
 - [v2_baseline_review_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)
+- [candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
 
 ## 3. 一次完整实验会产出什么
 
@@ -138,6 +151,17 @@ PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/t
 - [`robustness_factor_regime.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_factor_regime.csv)
 - [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/robustness_report.md)
 - [`robustness_analysis.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
+
+### 3.7 候选基线补证层
+
+- [`candidate_validation_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/candidate_validation_summary.json)
+- [`candidate_validation_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/candidate_validation_report.md)
+- [`style_phase_summary.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/style_phase_summary.csv)
+- [`style_phase_detail.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/style_phase_detail.csv)
+- [`style_phase_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/style_phase_report.md)
+- [`excess_attribution_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/excess_attribution_summary.json)
+- [`excess_attribution_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/excess_attribution_monthly.csv)
+- [`excess_attribution_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/excess_attribution_report.md)
 
 ## 4. 如何判断两次实验是否可比
 
@@ -255,6 +279,18 @@ PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/t
 - [`robustness_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_summary.json)
 - [`robustness_time_slices.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_time_slices.csv)
 - [`robustness_month_contribution.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_month_contribution.csv)
+
+如果你要继续回答“能不能升 baseline”，建议再执行：
+
+```bash
+PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config configs/tushare_scoring_v2.json
+```
+
+优先查看：
+
+- [`candidate_validation_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/candidate_validation_report.md)
+- [`style_phase_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/style_phase_report.md)
+- [`excess_attribution_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/excess_attribution_report.md)
 
 ## 6. 实验阅读顺序建议
 

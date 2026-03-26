@@ -102,6 +102,10 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
     if not _cached_snapshot_matches_config(config, metadata):
         # raw 层是跨命令复用的共享缓存；这里必须先校验口径一致，否则 sample 与 tushare 会互相污染。
         return None
+    aligned_metadata = _align_cached_snapshot_metadata(config, metadata)
+    if aligned_metadata != metadata:
+        write_json(snapshot_path, aligned_metadata)
+    metadata = aligned_metadata
     entity_rows = read_csv(entity_path)
     share_rows = read_csv(share_path)
     fund_type_audit_rows = read_csv(fund_type_audit_path) if fund_type_audit_path.exists() else _build_fund_type_audit_from_entity_cache(entity_rows, share_rows)
@@ -161,8 +165,9 @@ def _cached_snapshot_matches_config(config: AppConfig, metadata: object) -> bool
     # 真实基金快照的规模口径升级后，需要主动淘汰旧缓存，否则会继续复用“代表份额规模”这一错误结果。
     if str(metadata.get("entity_asset_aggregation") or "").strip() != "sum_of_share_classes":
         return False
+    current_benchmark = benchmark_to_serializable_dict(config.benchmark)
     cached_benchmark = metadata.get("benchmark_config")
-    if cached_benchmark == benchmark_to_serializable_dict(config.benchmark):
+    if cached_benchmark == current_benchmark:
         return True
     benchmark_source = str(metadata.get("benchmark_source") or "").strip()
     if benchmark_source != config.benchmark.source:
@@ -170,7 +175,26 @@ def _cached_snapshot_matches_config(config: AppConfig, metadata: object) -> bool
     cached_default_key = str(metadata.get("benchmark_default_key") or "").strip()
     if cached_default_key and cached_default_key != config.benchmark.default_key:
         return False
+    cached_series = metadata.get("benchmark_series")
+    if isinstance(cached_series, dict) and cached_series != current_benchmark.get("series"):
+        return False
     return True
+
+
+def _align_cached_snapshot_metadata(config: AppConfig, metadata: object) -> dict[str, object]:
+    """把可复用 raw 快照的 benchmark 元数据对齐到当前配置，避免 clean/report 继续展示旧映射。"""
+    if not isinstance(metadata, dict):
+        return {}
+    aligned = dict(metadata)
+    benchmark_config = benchmark_to_serializable_dict(config.benchmark)
+    aligned["benchmark_config"] = benchmark_config
+    aligned["benchmark_name"] = config.benchmark.series_for_key(config.benchmark.default_key).name
+    aligned["benchmark_source"] = config.benchmark.source
+    aligned["benchmark_ts_code"] = config.benchmark.series_for_key(config.benchmark.default_key).ts_code
+    aligned["benchmark_default_key"] = config.benchmark.default_key
+    aligned["benchmark_series"] = benchmark_config["series"]
+    aligned["benchmark_primary_type_map"] = config.benchmark.primary_type_map
+    return aligned
 
 
 class TushareDataProvider:

@@ -10,6 +10,7 @@ from fund_research_v2.common.date_utils import current_timestamp, latest_complet
 from fund_research_v2.common.io_utils import append_jsonl, ensure_directories, write_csv, write_json
 from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, load_dataset, warm_failed_api_cache
 from fund_research_v2.evaluation.experiment_comparator import build_experiment_comparison, load_portfolio_snapshot, read_experiment_records
+from fund_research_v2.evaluation.candidate_validation import build_candidate_validation
 from fund_research_v2.evaluation.robustness import build_robustness_analysis, default_baseline_config_path
 from fund_research_v2.evaluation.metrics import summarize_backtest
 from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
@@ -17,6 +18,11 @@ from fund_research_v2.features.feature_builder import build_feature_rows
 from fund_research_v2.portfolio.construction import build_portfolio
 from fund_research_v2.ranking.scoring_engine import score_funds
 from fund_research_v2.reporting.comparison_reports import render_comparison_report
+from fund_research_v2.reporting.candidate_validation_reports import (
+    render_candidate_validation_report,
+    render_excess_attribution_report,
+    render_style_phase_report,
+)
 from fund_research_v2.reporting.robustness_reports import render_robustness_report
 from fund_research_v2.reporting.reports import (
     render_backtest_report,
@@ -86,6 +92,35 @@ def analyze_robustness_command(config_path: Path) -> None:
     write_csv(result_dir / "robustness_portfolio_behavior.csv", analysis.get("portfolio_behavior_rows", []))
     write_csv(result_dir / "robustness_factor_regime.csv", analysis.get("factor_regime_rows", []))
     render_robustness_report(report_dir / "robustness_report.md", analysis)
+
+
+def validate_baseline_candidate_command(config_path: Path) -> None:
+    """对候选评分体系执行 A/B 两项最小补充验证。"""
+    config = load_config(config_path)
+    baseline_config_path = default_baseline_config_path(config_path, config.data_source)
+    candidate_bundle = prepare_bundle(config_path)
+    baseline_bundle = prepare_bundle(baseline_config_path)
+    candidate_config: AppConfig = candidate_bundle["config"]
+    project_root: Path = candidate_bundle["project_root"]
+    validation_dir = candidate_validation_dir(candidate_config, project_root)
+    ensure_directories([validation_dir])
+    validation = build_candidate_validation(
+        candidate_config=candidate_bundle["config"],
+        baseline_config=baseline_bundle["config"],
+        dataset=candidate_bundle["dataset"],
+        candidate_score_rows=candidate_bundle["score_rows"],
+        baseline_score_rows=baseline_bundle["score_rows"],
+    )
+    write_json(validation_dir / "candidate_validation_summary.json", validation.get("summary", {}))
+    write_csv(validation_dir / "style_phase_summary.csv", validation.get("style_phase_summary_rows", []))
+    write_csv(validation_dir / "style_phase_detail.csv", validation.get("style_phase_detail_rows", []))
+    write_csv(validation_dir / "style_phase_rolling_windows.csv", validation.get("style_phase_window_rows", []))
+    write_json(validation_dir / "style_phase_stability_summary.json", validation.get("style_phase_stability_summary", {}))
+    write_json(validation_dir / "excess_attribution_summary.json", validation.get("attribution_summary", {}))
+    write_csv(validation_dir / "excess_attribution_monthly.csv", validation.get("attribution_monthly_rows", []))
+    render_candidate_validation_report(validation_dir / "candidate_validation_report.md", validation)
+    render_style_phase_report(validation_dir / "style_phase_report.md", validation)
+    render_excess_attribution_report(validation_dir / "excess_attribution_report.md", validation)
 
 
 def run_universe_command(config_path: Path) -> None:
@@ -471,6 +506,11 @@ def all_artifact_dirs(config: AppConfig, project_root: Path) -> list[Path]:
 def artifact_dir(config: AppConfig, project_root: Path, base_dir: Path) -> Path:
     """解析某个配置目录在当前数据源下的真实目录。"""
     return project_root / scope_artifact_dir(base_dir, config.data_source)
+
+
+def candidate_validation_dir(config: AppConfig, project_root: Path) -> Path:
+    """返回候选 baseline 验证的独立产物目录。"""
+    return artifact_dir(config, project_root, config.paths.result_dir).parent / "candidate_validation"
 
 
 def git_commit_hash(project_root: Path) -> str:

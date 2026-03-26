@@ -229,7 +229,7 @@
   - 含义：benchmark 代码
   - 当前默认映射：
     - `主动股票 -> broad_equity -> 中证800 (000906.SH)`
-    - `偏股混合 -> large_cap_equity -> 沪深300 (000300.SH)`
+    - `偏股混合 -> broad_equity -> 中证800 (000906.SH)`
     - `灵活配置混合 -> broad_equity -> 中证800 (000906.SH)`
 
 ## 6. `fund_universe_monthly.csv`

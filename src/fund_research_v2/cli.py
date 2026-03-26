@@ -15,6 +15,7 @@ from fund_research_v2.common.workflows import (
     run_portfolio_command,
     run_ranking_command,
     run_universe_command,
+    validate_baseline_candidate_command,
 )
 
 
@@ -28,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
         "fetch-failed",
         "compare-experiments",
         "analyze-robustness",
+        "validate-baseline-candidate",
         "build-universe",
         "compute-features",
         "run-ranking",
@@ -51,6 +53,7 @@ def main() -> int:
         "fetch-failed": fetch_failed_command,
         "compare-experiments": compare_experiments_command,
         "analyze-robustness": analyze_robustness_command,
+        "validate-baseline-candidate": validate_baseline_candidate_command,
         "build-universe": run_universe_command,
         "compute-features": run_feature_command,
         "run-ranking": run_ranking_command,
