@@ -206,7 +206,8 @@
     - `broad_equity`
     - `large_cap_equity`
   - 当前用途：
-    - 让不同 `primary_type` 可以映射到不同公开指数
+    - 让特征层和原始数据快照可以同时容纳多条公开指数
+    - 支持 `primary_type` 到特征层 benchmark 的映射
 - `benchmark_return_1m`
   - 类型：浮点数
   - 含义：benchmark 当月收益
@@ -227,10 +228,13 @@
   - 含义：benchmark 名称
 - `benchmark_ts_code`
   - 含义：benchmark 代码
-  - 当前默认映射：
+  - 当前特征层默认映射：
     - `主动股票 -> broad_equity -> 中证800 (000906.SH)`
     - `偏股混合 -> broad_equity -> 中证800 (000906.SH)`
     - `灵活配置混合 -> broad_equity -> 中证800 (000906.SH)`
+  - 当前主回测口径：
+    - 固定使用 `benchmark.default_key`
+    - 默认即 `broad_equity -> 中证800 (000906.SH)`
 
 ## 6. `fund_universe_monthly.csv`
 
@@ -507,7 +511,8 @@
 - `portfolio_return_net`
   - 扣成本后组合收益
 - `benchmark_return`
-  - benchmark 同月收益
+  - 固定市场 benchmark 的同月收益
+  - 当前主回测口径固定使用 `benchmark.default_key` 对应的 benchmark，不再按组合持仓动态混合 benchmark
 - `turnover`
   - 当月换手率
 - `transaction_cost`

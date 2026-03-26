@@ -48,10 +48,10 @@
 
 当前默认 benchmark 口径为：
 
-- `主动股票 -> 中证800 (000906.SH)`
-- `偏股混合 -> 中证800 (000906.SH)`
-- `灵活配置混合 -> 中证800 (000906.SH)`
-- 若某类基金缺少专属 benchmark 序列，则回退到默认 benchmark
+- 主回测固定使用 `benchmark.default_key`
+- 当前 `benchmark.default_key = broad_equity = 中证800 (000906.SH)`
+- 因此当前默认 baseline、候选评分体系的主回测 benchmark 都是中证800
+- 配置中的 `primary_type_map` 当前主要保留给特征层、原始多指数缓存与元数据说明，不再决定主回测 benchmark
 
 当前默认研究节奏为：
 
@@ -148,7 +148,8 @@
 当前 `benchmark_monthly.csv` 也已支持多条指数并行缓存：
 
 - 不再假设整个研究流程只对应一条 benchmark 序列
-- 具体基金类型使用哪条指数，由配置中的 `benchmark.primary_type_map` 决定
+- 特征层仍可按 `benchmark.primary_type_map` 读取对应指数
+- 但主回测当前固定使用 `benchmark.default_key`，不会按基金类型动态切换 benchmark
 
 真实 `tushare` 抓数现在还会额外保留单接口响应缓存：
 

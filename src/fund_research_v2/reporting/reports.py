@@ -33,7 +33,7 @@ def _time_boundary_notes() -> list[str]:
 
 
 def _benchmark_summary_lines(config: AppConfig, dataset_metadata: dict[str, object]) -> list[str]:
-    """返回 benchmark 配置摘要，便于报告解释当前比较基准口径。"""
+    """返回 benchmark 配置摘要，便于报告解释当前固定市场基准口径。"""
     benchmark_series = dataset_metadata.get("benchmark_series")
     if not isinstance(benchmark_series, dict) or not benchmark_series:
         benchmark_series = {
@@ -47,7 +47,11 @@ def _benchmark_summary_lines(config: AppConfig, dataset_metadata: dict[str, obje
     if not isinstance(primary_type_map, dict):
         primary_type_map = config.benchmark.primary_type_map
     default_key = str(dataset_metadata.get("benchmark_default_key") or config.benchmark.default_key)
-    lines = [f"- benchmark_default_key: {default_key}", "- benchmark_series:"]
+    lines = [
+        f"- benchmark_default_key: {default_key}",
+        "- benchmark_usage: 回测主口径固定使用 benchmark_default_key 对应的市场基准，不再按组合持仓动态混合 benchmark。",
+        "- benchmark_series:",
+    ]
     for benchmark_key in sorted(benchmark_series):
         payload = benchmark_series[benchmark_key]
         if isinstance(payload, dict):
@@ -118,7 +122,7 @@ def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], s
             f"- {row['execution_month']}: request_proxy={row.get('execution_request_date_proxy', '')}, "
             f"effective_proxy={row.get('execution_effective_date_proxy', '')}, "
             f"net={row['portfolio_return_net']}, "
-            f"benchmark={row['benchmark_return']}, benchmark_mix={row.get('benchmark_mix', '')}, turnover={row['turnover']}, "
+            f"benchmark={row['benchmark_return']}, turnover={row['turnover']}, "
             f"missing_weight={row.get('missing_weight', 0.0)}, missing_positions={row.get('missing_position_count', 0)}, "
             f"validity={row.get('return_validity', '')}, low_confidence={row.get('low_confidence_flag', 0)}"
         )

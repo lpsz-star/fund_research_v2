@@ -297,7 +297,8 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 如果你要理解一次实验结果，建议按以下顺序阅读：
 
 1. [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/dataset_snapshot.json)
-   - 先确认数据源、样本范围、benchmark 和规模口径
+   - 先确认数据源、样本范围、主回测 benchmark 和规模口径
+   - benchmark 优先看 `benchmark_name`、`benchmark_ts_code` 与 `benchmark_default_key`，不要只看 `primary_type_map`
 2. [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
    - 先确认哪些字段能解释历史月份，哪些只是最新快照
 3. [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
@@ -358,7 +359,8 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 
 - 运行日期
 - 使用配置文件
-- benchmark
+- 主回测 benchmark
+- `benchmark.default_key`
 - 数据快照时间
 - 类型基线快照
 - 是否命中缓存
@@ -382,7 +384,25 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 
 ### 9.2 当前 benchmark 仍为统一市场 benchmark
 
-当前默认使用中证800，对不同风格基金并非最细口径。
+当前主回测固定使用 `benchmark.default_key` 对应的统一市场 benchmark。
+
+在当前默认配置下：
+
+- `benchmark.default_key = broad_equity`
+- `broad_equity = 中证800 (000906.SH)`
+
+因此当前 baseline 与候选评分体系的主回测 benchmark 都是中证800。
+
+补充说明：
+
+- 配置中仍保留 `series` 与 `primary_type_map`
+- 这些配置当前主要服务于特征层、原始多指数缓存和元数据记录
+- 它们不再表示“主回测会按基金类型动态切换 benchmark”
+
+这意味着：
+
+- 讨论回测结果时，应先看 `benchmark.default_key` 和实验快照中的 `benchmark_name`
+- 不能只看 `primary_type_map` 就推断主回测 benchmark 口径
 
 ### 9.3 当前实验目录不是 git 仓库
 

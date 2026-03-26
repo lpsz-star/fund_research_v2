@@ -87,7 +87,8 @@
 - 特征阶段
   - `excess_ret_12m` 只使用 `signal_month` 月末前已可见的 benchmark 月收益
 - 回测评估阶段
-  - 组合收益与 `execution_month` benchmark 收益做事后对比
+  - 组合收益与 `execution_month` 的固定市场 benchmark 收益做事后对比
+  - 当前主回测口径固定使用 `benchmark.default_key` 对应的市场 benchmark，不再按组合持仓动态混合 benchmark
 
 回测只比较同一 `execution_month` 下：
 

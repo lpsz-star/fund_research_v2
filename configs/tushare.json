@@ -60,7 +60,7 @@
     "use_cached_raw": true,
     "start_date": "20200101",
     "end_date": null,
-    "max_funds": 1000,
+    "max_funds": 3000,
     "request_retry_count": 2,
     "request_pause_ms": 0,
     "progress_every_entities": 10

@@ -18,6 +18,8 @@
 基金净值：https://tushare.pro/document/2?doc_id=119
 基金分红：https://tushare.pro/document/2?doc_id=120
 基金持仓：https://tushare.pro/document/2?doc_id=121
+指数基本信息：https://tushare.pro/document/2?doc_id=94
+指数日线行情：https://tushare.pro/document/2?doc_id=95
 
 ## 2. 数据分层
 
@@ -168,7 +170,8 @@
 
 - 当前允许同一研究快照同时保存多条 benchmark 序列。
 - `benchmark_key` 是项目内部使用的稳定标识，例如 `broad_equity`、`large_cap_equity`。
-- 基金类型到 benchmark 的映射由配置中的 `benchmark.primary_type_map` 决定。
+- 基金类型到 benchmark 的映射当前主要用于特征层构造超额收益类因子。
+- 回测主口径固定使用 `benchmark.default_key` 对应的市场 benchmark，不再按组合持仓动态混合 benchmark。
 - 若存在 `available_date`，则特征层构造 `excess_ret_12m` 时只能使用信号月月末前已可见的 benchmark 月收益。
 
 ### 3.5 `manager_assignment_monthly`

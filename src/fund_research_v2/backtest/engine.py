@@ -37,16 +37,19 @@ def run_backtest(
         # 回测严格采用“本月生成信号，下一月兑现收益”的时序。
         current_scores = scores_by_month.get(current_month, [])
         portfolio = build_portfolio(config, current_scores)
-        score_lookup = {str(row["entity_id"]): row for row in current_scores}
         execution_request_date = month_start(next_month)
         # 这里把 execution_month 月初同时作为“申请提交”和“确认生效”的代理日。
         # 原因不是认为真实基金一定在这一天成交，而是当前只有月频收益、没有开放申购日和确认规则，
         # 因此只能用一个显式代理日把“次月开始承担收益”写清楚，避免误读为信号月内已成交。
         execution_effective_date = execution_request_date
         gross_return = 0.0
-        benchmark_return = 0.0
+        benchmark_return = _benchmark_return_for_key(
+            benchmark_lookup,
+            config.benchmark.default_key,
+            config.benchmark.default_key,
+            next_month,
+        )
         current_weights = {}
-        benchmark_key_weights: dict[str, float] = defaultdict(float)
         missing_weight = 0.0
         missing_position_count = 0
         for position in portfolio:
@@ -59,11 +62,6 @@ def run_backtest(
             if int(resolved_position["missing_return_flag"]) == 1:
                 missing_weight += weight
                 missing_position_count += 1
-            primary_type = str(score_lookup.get(entity_id, {}).get("primary_type") or "")
-            benchmark_key = config.benchmark.key_for_primary_type(primary_type)
-            benchmark_value = _benchmark_return_for_key(benchmark_lookup, benchmark_key, config.benchmark.default_key, next_month)
-            benchmark_return += weight * benchmark_value
-            benchmark_key_weights[benchmark_key] += weight
             position_audit_rows.append(
                 {
                     "signal_month": current_month,
@@ -77,10 +75,6 @@ def run_backtest(
                     "handling_policy": config.backtest.missing_return_policy,
                 }
             )
-        if not portfolio:
-            default_key = config.benchmark.default_key
-            benchmark_return = _benchmark_return_for_key(benchmark_lookup, default_key, default_key, next_month)
-            benchmark_key_weights[default_key] = 1.0
         turnover = _turnover(previous_weights, current_weights)
         cost = turnover * (config.backtest.transaction_cost_bps / 10000.0)
         net_return = gross_return - cost
@@ -94,7 +88,6 @@ def run_backtest(
                 "portfolio_return_gross": round(gross_return, 6),
                 "portfolio_return_net": round(net_return, 6),
                 "benchmark_return": round(benchmark_return, 6),
-                "benchmark_mix": _format_benchmark_mix(benchmark_key_weights),
                 "turnover": round(turnover, 6),
                 "transaction_cost": round(cost, 6),
                 "holdings": len(portfolio),
@@ -157,9 +150,3 @@ def _benchmark_return_for_key(
     if benchmark_key in benchmark_lookup and month in benchmark_lookup[benchmark_key]:
         return benchmark_lookup[benchmark_key][month]
     return benchmark_lookup.get(default_benchmark_key, {}).get(month, 0.0)
-
-
-def _format_benchmark_mix(weights: dict[str, float]) -> str:
-    """把组合内 benchmark 权重写成可审计字符串，方便回头解释组合比较基准。"""
-    ordered = sorted(((key, value) for key, value in weights.items() if value > 0), key=lambda item: item[0])
-    return "|".join(f"{key}:{round(value, 6)}" for key, value in ordered)

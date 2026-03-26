@@ -137,7 +137,8 @@
 - 信号时点：最后一个完整自然月的月末
 - 执行时点：下一月
 - 组合方法：规则约束法
-- benchmark：配置中的 `benchmark_return_1m`
+- 特征层 benchmark：使用 `benchmark_monthly` 中的 `benchmark_return_1m`
+- 主回测 benchmark：固定使用 `benchmark.default_key` 对应的市场 benchmark
 - 成本：固定 `transaction_cost_bps`
 - A/C 份额：默认按基金实体合并，不把份额差异当作独立 alpha 来源
 
@@ -145,4 +146,3 @@
 
 - 若 `as_of_date` 仍处于月中，则正式最新研究月自动回退到上一个月
 - 当月 raw 数据即使已经部分到达，也只能作为观察快照，不进入正式组合与正式审计
-

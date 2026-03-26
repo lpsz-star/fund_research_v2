@@ -300,3 +300,28 @@
   - 修复前，协作者容易把存在缺失收益的月份误读为与普通月份同等可靠。
   - 修复后，历史收益定义未变，但回测结果的可解释性显著增强。
 - 当前状态：已修复，并补充测试。
+
+## 17. benchmark 配置保留多序列映射，但主回测已固定使用默认市场 benchmark，容易被误读
+
+- 发现时间：2026-03-26
+- 影响模块：
+  - [`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
+  - [`configs/tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+  - [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)
+  - [`engine.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/backtest/engine.py)
+  - 报告与协作文档
+- 现象：
+  - 配置里同时保留 `series` 与 `primary_type_map`，看起来像“主回测仍会按基金类型切换 benchmark”。
+  - 但当前主回测实际只使用 `benchmark.default_key`，也就是固定市场 benchmark。
+  - 如果只看配置、不看引擎实现，协作者很容易误以为 `偏股混合 -> broad_equity`、`主动股票 -> broad_equity` 这些映射仍直接驱动主回测。
+- 根因：
+  - 为了兼容特征层、多 benchmark 原始数据和历史元数据，配置结构保留了多序列映射。
+  - 但主回测逻辑已切回固定市场 benchmark，配置结构与主执行语义没有同步收敛，导致“看配置像多 benchmark、看引擎才知道是固定 benchmark”的表达断层。
+- 修复方案：
+  - 在文档和报告中明确写清：主回测固定使用 `benchmark.default_key`，`primary_type_map` 当前只保留为元数据和扩展位。
+  - 后续若继续保留该配置结构，所有 benchmark 相关文档都必须同时说明“配置能力”和“主回测实际用法”。
+  - 若未来再次启用多 benchmark 主回测，必须单独记录到 `changes.md` 与 `error_log.md`，避免口径回摆却没有显式审计。
+- 影响范围：
+  - 容易导致 benchmark 口径被错误理解，进而误判超额收益、比较报告和升级评审结论。
+  - 容易在后续协作中再次出现“以为主回测按基金类型挂 benchmark，实际上并没有”的重复错误。
+- 当前状态：已记录，并已在当前文档中补充固定市场 benchmark 说明。

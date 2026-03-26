@@ -4,7 +4,7 @@
 
 ## 2026-03-26
 
-### 0. 将 `tushare_scoring_v2_lite` 提升为当前主候选评分体系
+### 1. 将 `tushare_scoring_v2_lite` 提升为当前主候选评分体系
 
 - 变更内容：
   - 新增 [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)。
@@ -15,9 +15,20 @@
   - 在当前真实样本与中证800 benchmark 口径下，验证删除 `manager_post_change_excess_delta_12m` 后的候选是否更优。
   - 把当前最值得继续跟踪的候选从旧 `v2` 收敛到更干净的 `v2-lite`。
 
+### 2. 把回测主 benchmark 口径统一改回固定市场 benchmark
+
+- 变更内容：
+  - 回测中的 `benchmark_return` 不再按组合持仓权重动态聚合各类型 benchmark。
+  - 主回测口径固定使用 `benchmark.default_key` 对应的市场 benchmark。
+  - `backtest_report.md` 不再展示 `benchmark_mix`。
+  - `backtest_conventions.md`、`data_contracts.md`、`data_dictionary.md` 同步更新 benchmark 说明。
+- 目的：
+  - 修复 `benchmark_cumulative_return` 会随组合结构、未满仓权重和扩样本变化而漂移的设计缺陷。
+  - 让 `benchmark_cumulative_return` 与 `excess_cumulative_return` 恢复为跨实验稳定、可解释的固定市场 benchmark 口径。
+
 ## 2026-03-24
 
-### -2. 把偏股混合的默认 benchmark 映射从沪深300切回中证800
+### 1. 把偏股混合的默认 benchmark 映射从沪深300切回中证800
 
 - 变更内容：
   - `tushare`、`tushare_scoring_v2`、`tushare_scoring_v3` 与 `default` 配置中，`偏股混合` 的 `benchmark.primary_type_map` 从 `large_cap_equity` 调整为 `broad_equity`。
@@ -26,7 +37,7 @@
   - 基于现有真实样本下近 36 个月日频贴近度旁路结果，降低把大多数 `偏股混合` 统一映射到沪深300带来的风格错配。
   - 先把 `偏股混合` 的默认 benchmark 调整为更中性的中证800，再为后续 300/800 动态二分映射预留空间。
 
-### -1. 新增候选 baseline 补证命令与独立产物目录
+### 2. 新增候选 baseline 补证命令与独立产物目录
 
 - 变更内容：
   - 新增 `validate-baseline-candidate` CLI 命令与 `make validate-tushare-v2` 入口。
@@ -38,7 +49,7 @@
   - 把“风格/阶段集中性”和“beta vs selection 归因”变成标准 CLI 产物，而不是临时分析。
   - 让 A/B 补证和常规 `result/`、`reports/` 产物分层，降低协作时的阅读混淆。
 
-### 0. 修复 `comparison_report` 容易陈旧的问题
+### 3. 修复 `comparison_report` 容易陈旧的问题
 
 - 变更内容：
   - `run-experiment` 在成功写入新的实验记录后，会自动刷新当前数据源下最近两次实验的 comparison 产物。
@@ -48,7 +59,7 @@
   - 防止实验登记已经追加新记录，但 `comparison_report.md` 仍停在旧一轮。
   - 降低协作者把单文件 comparison 报告误读为“当前最新官方对比结论”的风险。
 
-### 1. 新增候选评分稳健性分析说明文档
+### 4. 新增候选评分稳健性分析说明文档
 
 - 变更内容：
   - 新增 [`robustness_analysis.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)。
@@ -57,7 +68,7 @@
   - 把 `analyze-robustness` 的诊断逻辑、flag 含义、输出字段和使用边界讲清楚。
   - 降低人类协作者把 `robustness_report.md` 当成“自动升级结论”的误读风险。
 
-### 2. 新增 baseline 升级决策清单
+### 5. 新增 baseline 升级决策清单
 
 - 变更内容：
   - 新增 [`baseline_upgrade_checklist.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)。
@@ -66,7 +77,7 @@
   - 把“候选配置是否升级为默认 baseline”的判断标准单独沉淀成一页清单。
   - 让评审时优先比较证据质量，而不是只盯单次收益提升。
 
-### 3. 补充 `tushare_scoring_v2` 的 baseline 升级评审记录
+### 6. 补充 `tushare_scoring_v2` 的 baseline 升级评审记录
 
 - 变更内容：
   - 新增 [`v2_baseline_review_2026-03-25.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-25.md)。
@@ -75,7 +86,7 @@
   - 把这次关于 `v2` 是否升级 baseline 的讨论按中证800新口径沉淀成正式记录。
   - 避免后续重复回忆口头结论，或把“主候选基线”误读为“已升级默认 baseline”。
 
-### 4. 新增 `v2` 最小验证实施计划
+### 7. 新增 `v2` 最小验证实施计划
 
 - 变更内容：
   - 新增 [`v2_min_validation_plan_2026-03-24.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_min_validation_plan_2026-03-24.md)。
