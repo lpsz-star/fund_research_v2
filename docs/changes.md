@@ -26,6 +26,15 @@
   - 修复 `benchmark_cumulative_return` 会随组合结构、未满仓权重和扩样本变化而漂移的设计缺陷。
   - 让 `benchmark_cumulative_return` 与 `excess_cumulative_return` 恢复为跨实验稳定、可解释的固定市场 benchmark 口径。
 
+### 3. 新增因子迭代框架文档
+
+- 变更内容：
+  - 新增 [`factor_iteration_framework.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_iteration_framework.md)。
+  - `README.md` 中补充该文档索引。
+- 目的：
+  - 把“哪些因子该进入主候选评分体系、如何做竞争位替换、如何小步迭代”的方法单独沉淀成协作文档。
+  - 让评分体系优化从临场讨论，收敛为可复用的固定框架。
+
 ## 2026-03-24
 
 ### 1. 把偏股混合的默认 benchmark 映射从沪深300切回中证800
