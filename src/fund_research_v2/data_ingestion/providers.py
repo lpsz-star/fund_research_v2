@@ -227,20 +227,6 @@ class TushareDataProvider:
         """抓取基金主数据、经理、净值和规模，并组装成研究快照。"""
         # fund_basic 是基金场景的主入口；先拿到基金全集，再决定哪些份额会被归并成同一实体。
         fetch_started_at = time.monotonic()
-        fund_basic = self._call_api(
-            "fund_basic",
-            self.client.fund_basic,
-            market=self.config.tushare.fund_market,
-            status=self.config.tushare.fund_status,
-        )
-        if fund_basic is None or fund_basic.empty:
-            raise RuntimeError("Tushare fund_basic 返回空结果。")
-        company_df = self._call_api("fund_company", self.client.fund_company)
-        company_lookup = _build_company_lookup(company_df)
-        fund_basic = fund_basic.copy().sort_values("ts_code")
-        if self.config.tushare.max_funds:
-            fund_basic = fund_basic.head(self.config.tushare.max_funds)
-
         fund_entity_master: list[dict[str, object]] = []
         share_class_map: list[dict[str, object]] = []
         nav_rows: list[dict[str, object]] = []
@@ -249,127 +235,163 @@ class TushareDataProvider:
         fund_type_audit_rows: list[dict[str, object]] = []
         fund_liquidity_audit_rows: list[dict[str, object]] = []
         dropped_entities: list[dict[str, object]] = []
-        grouped_rows = _group_share_classes(fund_basic.to_dict("records"))
-        total_entities = len(grouped_rows)
-        for index, (entity_id, rows) in enumerate(grouped_rows.items(), start=1):
-            representative_row = _select_representative_share_class(rows)
-            classification = classify_fund_type(
-                fund_type=str(representative_row.get("fund_type") or ""),
-                invest_type=str(representative_row.get("invest_type") or ""),
-                fund_name=str(representative_row.get("name") or representative_row["ts_code"]),
-                benchmark_text=str(representative_row.get("benchmark") or ""),
+        total_entities = 0
+        selected_share_class_count = 0
+        last_entity_id = ""
+        try:
+            fund_basic = self._call_api(
+                "fund_basic",
+                self.client.fund_basic,
+                market=self.config.tushare.fund_market,
+                status=self.config.tushare.fund_status,
             )
-            liquidity = classify_fund_liquidity(str(representative_row.get("name") or representative_row["ts_code"]))
-            # 后续特征和回测都以“基金实体”而不是份额类为单位，避免 A/C 份额重复入选。
-            fund_company = str(representative_row.get("management") or "unknown")
-            company_meta = company_lookup.get(fund_company, {})
-            manager_name, manager_begin_date = self._fetch_current_manager(str(representative_row["ts_code"]))
-            latest_assets_cny_mn, entity_nav_rows = self._fetch_entity_monthly_nav_rows(rows, entity_id)
-            if not entity_nav_rows:
-                # 没有可用月频净值的基金不能进入研究层，否则后续收益窗口和回测口径都无法成立。
-                dropped_entities.append(
-                    {
-                        "entity_id": entity_id,
-                        "entity_name": _normalize_entity_name(str(representative_row.get("name") or representative_row["ts_code"])),
-                        "fund_company": str(representative_row.get("management") or "unknown"),
-                        "primary_type": classification["primary_type"],
-                        "share_class_ids": "|".join(str(row["ts_code"]) for row in rows),
-                        "share_class_count": len(rows),
-                        "drop_reason": "no_valid_entity_monthly_nav",
-                        "representative_share_class_id": str(representative_row["ts_code"]),
-                    }
-                )
-                continue
-            manager_rows.extend(self._build_manager_assignment_rows(str(representative_row["ts_code"]), entity_id, entity_nav_rows))
-            normalized_name = _normalize_entity_name(str(representative_row.get("name") or representative_row["ts_code"]))
-            fund_entity_master.append(
-                {
-                    "entity_id": entity_id,
-                    "entity_name": normalized_name,
-                    "primary_type": classification["primary_type"],
-                    "fund_company": fund_company,
-                    "fund_company_province": company_meta.get("province", ""),
-                    "fund_company_city": company_meta.get("city", ""),
-                    "fund_company_website": company_meta.get("website", ""),
-                    "manager_name": manager_name,
-                    "manager_start_month": _normalize_month(manager_begin_date),
-                    "inception_month": _normalize_month(representative_row.get("found_date") or representative_row.get("issue_date") or "20000101"),
-                    "latest_assets_cny_mn": latest_assets_cny_mn,
-                    "liquidity_restricted": int(liquidity["liquidity_restricted"]),
-                    "holding_lock_months": int(liquidity["holding_lock_months"]),
-                    "status": representative_row.get("status") or "L",
-                    "custodian": representative_row.get("custodian") or "",
-                    "benchmark_text": representative_row.get("benchmark") or "",
-                    "invest_type": representative_row.get("invest_type") or "",
-                    "representative_share_class_id": representative_row["ts_code"],
-                }
-            )
-            fund_type_audit_rows.append(
-                {
-                    "entity_id": entity_id,
-                    "entity_name": normalized_name,
-                    "share_class_id": str(representative_row["ts_code"]),
-                    "fund_name": str(representative_row.get("name") or representative_row["ts_code"]),
-                    "raw_fund_type": classification["raw_fund_type"],
-                    "raw_invest_type": classification["raw_invest_type"],
-                    "benchmark_text": str(representative_row.get("benchmark") or ""),
-                    "primary_type": classification["primary_type"],
-                    "rule_code": classification["rule_code"],
-                    "confidence": classification["confidence"],
-                    "reason": classification["reason"],
-                }
-            )
-            fund_liquidity_audit_rows.append(
-                {
-                    "entity_id": entity_id,
-                    "entity_name": normalized_name,
-                    "share_class_id": str(representative_row["ts_code"]),
-                    "fund_name": str(representative_row.get("name") or representative_row["ts_code"]),
-                    "liquidity_restricted": int(liquidity["liquidity_restricted"]),
-                    "holding_lock_months": int(liquidity["holding_lock_months"]),
-                    "rule_code": str(liquidity["rule_code"]),
-                    "confidence": str(liquidity["confidence"]),
-                    "reason": str(liquidity["reason"]),
-                }
-            )
-            for row in rows:
-                share_class_map.append(
-                    {
-                        "entity_id": entity_id,
-                        "share_class_id": row["ts_code"],
-                        "share_class_name": row.get("name") or row["ts_code"],
-                        "is_primary_share_class": 1 if row["ts_code"] == representative_row["ts_code"] else 0,
-                    }
-                )
-            nav_rows.extend(entity_nav_rows)
-            if index % self.config.tushare.progress_every_entities == 0 or index == total_entities:
-                print(
-                    f"[tushare] entities={index}/{total_entities} "
-                    f"retained={len(fund_entity_master)} dropped={len(dropped_entities)} "
-                    f"nav_rows={len(nav_rows)} manager_rows={len(manager_rows)}"
-                )
+            if fund_basic is None or fund_basic.empty:
+                raise RuntimeError("Tushare fund_basic 返回空结果。")
+            company_df = self._call_api("fund_company", self.client.fund_company)
+            company_lookup = _build_company_lookup(company_df)
+            fund_basic = fund_basic.copy().sort_values("ts_code")
+            if self.config.tushare.max_funds:
+                fund_basic = fund_basic.head(self.config.tushare.max_funds)
+            selected_share_class_count = len(fund_basic)
 
-        month_set = sorted({str(row["month"]) for row in nav_rows})
-        benchmark_rows = self._fetch_benchmark_rows(month_set)
-        if not fund_entity_master or not nav_rows:
-            raise RuntimeError("Tushare 基金数据未形成有效的实体主表或月频净值表。")
-        return DatasetSnapshot(
-            fund_entity_master=fund_entity_master,
-            fund_share_class_map=share_class_map,
-            fund_nav_monthly=nav_rows,
-            benchmark_monthly=benchmark_rows,
-            manager_assignment_monthly=manager_rows,
-            fund_type_audit=fund_type_audit_rows,
-            fund_liquidity_audit=fund_liquidity_audit_rows,
-            metadata={
+            grouped_rows = _group_share_classes(fund_basic.to_dict("records"))
+            total_entities = len(grouped_rows)
+            self._write_fetch_progress(
+                status="running",
+                processed_entities=0,
+                total_entities=total_entities,
+                retained_entities=0,
+                dropped_entities=0,
+                nav_rows=0,
+                manager_rows=0,
+                selected_share_class_count=selected_share_class_count,
+                last_entity_id="",
+                runtime_seconds=round(time.monotonic() - fetch_started_at, 3),
+            )
+            for index, (entity_id, rows) in enumerate(grouped_rows.items(), start=1):
+                last_entity_id = entity_id
+                representative_row = _select_representative_share_class(rows)
+                classification = classify_fund_type(
+                    fund_type=str(representative_row.get("fund_type") or ""),
+                    invest_type=str(representative_row.get("invest_type") or ""),
+                    fund_name=str(representative_row.get("name") or representative_row["ts_code"]),
+                    benchmark_text=str(representative_row.get("benchmark") or ""),
+                )
+                liquidity = classify_fund_liquidity(str(representative_row.get("name") or representative_row["ts_code"]))
+                # 后续特征和回测都以“基金实体”而不是份额类为单位，避免 A/C 份额重复入选。
+                fund_company = str(representative_row.get("management") or "unknown")
+                company_meta = company_lookup.get(fund_company, {})
+                manager_name, manager_begin_date = self._fetch_current_manager(str(representative_row["ts_code"]))
+                latest_assets_cny_mn, entity_nav_rows = self._fetch_entity_monthly_nav_rows(rows, entity_id)
+                if not entity_nav_rows:
+                    # 没有可用月频净值的基金不能进入研究层，否则后续收益窗口和回测口径都无法成立。
+                    dropped_entities.append(
+                        {
+                            "entity_id": entity_id,
+                            "entity_name": _normalize_entity_name(str(representative_row.get("name") or representative_row["ts_code"])),
+                            "fund_company": str(representative_row.get("management") or "unknown"),
+                            "primary_type": classification["primary_type"],
+                            "share_class_ids": "|".join(str(row["ts_code"]) for row in rows),
+                            "share_class_count": len(rows),
+                            "drop_reason": "no_valid_entity_monthly_nav",
+                            "representative_share_class_id": str(representative_row["ts_code"]),
+                        }
+                    )
+                else:
+                    manager_rows.extend(self._build_manager_assignment_rows(str(representative_row["ts_code"]), entity_id, entity_nav_rows))
+                    normalized_name = _normalize_entity_name(str(representative_row.get("name") or representative_row["ts_code"]))
+                    fund_entity_master.append(
+                        {
+                            "entity_id": entity_id,
+                            "entity_name": normalized_name,
+                            "primary_type": classification["primary_type"],
+                            "fund_company": fund_company,
+                            "fund_company_province": company_meta.get("province", ""),
+                            "fund_company_city": company_meta.get("city", ""),
+                            "fund_company_website": company_meta.get("website", ""),
+                            "manager_name": manager_name,
+                            "manager_start_month": _normalize_month(manager_begin_date),
+                            "inception_month": _normalize_month(representative_row.get("found_date") or representative_row.get("issue_date") or "20000101"),
+                            "latest_assets_cny_mn": latest_assets_cny_mn,
+                            "liquidity_restricted": int(liquidity["liquidity_restricted"]),
+                            "holding_lock_months": int(liquidity["holding_lock_months"]),
+                            "status": representative_row.get("status") or "L",
+                            "custodian": representative_row.get("custodian") or "",
+                            "benchmark_text": representative_row.get("benchmark") or "",
+                            "invest_type": representative_row.get("invest_type") or "",
+                            "representative_share_class_id": representative_row["ts_code"],
+                        }
+                    )
+                    fund_type_audit_rows.append(
+                        {
+                            "entity_id": entity_id,
+                            "entity_name": normalized_name,
+                            "share_class_id": str(representative_row["ts_code"]),
+                            "fund_name": str(representative_row.get("name") or representative_row["ts_code"]),
+                            "raw_fund_type": classification["raw_fund_type"],
+                            "raw_invest_type": classification["raw_invest_type"],
+                            "benchmark_text": str(representative_row.get("benchmark") or ""),
+                            "primary_type": classification["primary_type"],
+                            "rule_code": classification["rule_code"],
+                            "confidence": classification["confidence"],
+                            "reason": classification["reason"],
+                        }
+                    )
+                    fund_liquidity_audit_rows.append(
+                        {
+                            "entity_id": entity_id,
+                            "entity_name": normalized_name,
+                            "share_class_id": str(representative_row["ts_code"]),
+                            "fund_name": str(representative_row.get("name") or representative_row["ts_code"]),
+                            "liquidity_restricted": int(liquidity["liquidity_restricted"]),
+                            "holding_lock_months": int(liquidity["holding_lock_months"]),
+                            "rule_code": str(liquidity["rule_code"]),
+                            "confidence": str(liquidity["confidence"]),
+                            "reason": str(liquidity["reason"]),
+                        }
+                    )
+                    for row in rows:
+                        share_class_map.append(
+                            {
+                                "entity_id": entity_id,
+                                "share_class_id": row["ts_code"],
+                                "share_class_name": row.get("name") or row["ts_code"],
+                                "is_primary_share_class": 1 if row["ts_code"] == representative_row["ts_code"] else 0,
+                            }
+                        )
+                    nav_rows.extend(entity_nav_rows)
+                if index % self.config.tushare.progress_every_entities == 0 or index == total_entities:
+                    print(
+                        f"[tushare] entities={index}/{total_entities} "
+                        f"retained={len(fund_entity_master)} dropped={len(dropped_entities)} "
+                        f"nav_rows={len(nav_rows)} manager_rows={len(manager_rows)}"
+                    )
+                    self._write_fetch_progress(
+                        status="running",
+                        processed_entities=index,
+                        total_entities=total_entities,
+                        retained_entities=len(fund_entity_master),
+                        dropped_entities=len(dropped_entities),
+                        nav_rows=len(nav_rows),
+                        manager_rows=len(manager_rows),
+                        selected_share_class_count=selected_share_class_count,
+                        last_entity_id=entity_id,
+                        runtime_seconds=round(time.monotonic() - fetch_started_at, 3),
+                    )
+
+            month_set = sorted({str(row["month"]) for row in nav_rows})
+            benchmark_rows = self._fetch_benchmark_rows(month_set)
+            if not fund_entity_master or not nav_rows:
+                raise RuntimeError("Tushare 基金数据未形成有效的实体主表或月频净值表。")
+            metadata = {
                 "source_name": "tushare",
                 "generated_at": current_timestamp(),
                 "entity_count": len(fund_entity_master),
                 "share_class_count": len(share_class_map),
                 "requested_max_funds": self.config.tushare.max_funds,
                 "ingestion_audit": {
-                    "selected_share_class_count": len(fund_basic),
-                    "grouped_entity_count": len(grouped_rows),
+                    "selected_share_class_count": selected_share_class_count,
+                    "grouped_entity_count": total_entities,
                     "retained_entity_count": len(fund_entity_master),
                     "retained_share_class_count": len(share_class_map),
                     "dropped_entity_count": len(dropped_entities),
@@ -424,8 +446,48 @@ class TushareDataProvider:
                     "api_error_samples": self._api_error_samples,
                 },
                 "entity_asset_aggregation": "sum_of_share_classes",
-            },
-        )
+            }
+            self._write_fetch_progress(
+                status="completed",
+                processed_entities=total_entities,
+                total_entities=total_entities,
+                retained_entities=len(fund_entity_master),
+                dropped_entities=len(dropped_entities),
+                nav_rows=len(nav_rows),
+                manager_rows=len(manager_rows),
+                selected_share_class_count=selected_share_class_count,
+                last_entity_id=last_entity_id,
+                runtime_seconds=round(time.monotonic() - fetch_started_at, 3),
+                entity_count=len(fund_entity_master),
+                share_class_count=len(share_class_map),
+                month_range=metadata["month_range"],
+            )
+            return DatasetSnapshot(
+                fund_entity_master=fund_entity_master,
+                fund_share_class_map=share_class_map,
+                fund_nav_monthly=nav_rows,
+                benchmark_monthly=benchmark_rows,
+                manager_assignment_monthly=manager_rows,
+                fund_type_audit=fund_type_audit_rows,
+                fund_liquidity_audit=fund_liquidity_audit_rows,
+                metadata=metadata,
+            )
+        except Exception as exc:
+            self._write_fetch_progress(
+                status="failed",
+                processed_entities=len(fund_entity_master) + len(dropped_entities),
+                total_entities=total_entities,
+                retained_entities=len(fund_entity_master),
+                dropped_entities=len(dropped_entities),
+                nav_rows=len(nav_rows),
+                manager_rows=len(manager_rows),
+                selected_share_class_count=selected_share_class_count,
+                last_entity_id=last_entity_id,
+                runtime_seconds=round(time.monotonic() - fetch_started_at, 3),
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+            raise
 
     def warm_api_cache_for_ts_codes(self, ts_codes: list[str]) -> dict[str, object]:
         """只为指定失败份额补抓单接口缓存，供后续全量流程复用。"""
@@ -809,6 +871,20 @@ class TushareDataProvider:
     def _api_cache_dir(self) -> Path:
         """返回单接口响应缓存目录。"""
         return self.project_root / scope_artifact_dir(self.config.paths.raw_dir, self.config.data_source) / "api_cache"
+
+    def _fetch_progress_path(self) -> Path:
+        """返回抓数进度文件路径。"""
+        return self.project_root / scope_artifact_dir(self.config.paths.raw_dir, self.config.data_source) / "fetch_progress.json"
+
+    def _write_fetch_progress(self, **payload: object) -> None:
+        """把抓数阶段的心跳信息写入 raw 层，便于长任务期间观察进度。"""
+        progress_payload = {
+            "source_name": "tushare",
+            "updated_at": current_timestamp(),
+            "requested_max_funds": self.config.tushare.max_funds,
+            **payload,
+        }
+        write_json(self._fetch_progress_path(), progress_payload)
 
     def _api_cache_path(self, api_name: str, kwargs: dict[str, object]) -> Path:
         """根据接口名和参数生成稳定缓存路径。"""

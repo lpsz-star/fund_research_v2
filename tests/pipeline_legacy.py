@@ -1639,6 +1639,97 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(first.to_dict("records"), second.to_dict("records"))
         self.assertEqual(provider.client.calls, 1)
 
+    def test_fetch_writes_incremental_progress_file(self) -> None:
+        """验证 Tushare 抓数会写出独立进度文件，避免长任务期间只能依赖最终快照判断是否停滞。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config = self._base_config(root)
+        config["data_source"] = "tushare"
+        config["tushare"]["download_enabled"] = True
+        config["tushare"]["use_cached_raw"] = False
+        config["tushare"]["max_funds"] = 2
+        config["tushare"]["progress_every_entities"] = 1
+        loaded_config = load_config(self._write_config(root, config))
+        import pandas as pd
+
+        provider = object.__new__(TushareDataProvider)
+        provider.project_root = root
+        provider.config = loaded_config
+        provider.pd = pd
+        provider._manager_df_cache = {}
+        provider._monthly_nav_cache = {}
+        provider._api_call_stats = defaultdict(lambda: {"calls": 0, "failures": 0, "elapsed_seconds": 0.0})
+        provider._api_error_samples = []
+        provider._api_last_call_at = {}
+        provider._api_min_interval_seconds = {}
+        provider._api_cache_hits = defaultdict(int)
+        provider._api_cache_misses = defaultdict(int)
+
+        class ClientLike:
+            def fund_basic(self, **_: object):
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "000001.OF",
+                            "name": "测试成长A",
+                            "management": "测试基金",
+                            "fund_type": "普通股票型基金",
+                            "invest_type": "契约型开放式",
+                            "benchmark": "中证800",
+                            "status": "L",
+                            "found_date": "20200101",
+                            "custodian": "托管行甲",
+                        },
+                        {
+                            "ts_code": "000002.OF",
+                            "name": "测试价值A",
+                            "management": "测试基金",
+                            "fund_type": "普通股票型基金",
+                            "invest_type": "契约型开放式",
+                            "benchmark": "中证800",
+                            "status": "L",
+                            "found_date": "20200101",
+                            "custodian": "托管行乙",
+                        },
+                    ]
+                )
+
+            def fund_company(self):
+                return pd.DataFrame([])
+
+        provider.client = ClientLike()
+        provider._call_api = lambda _api_name, func, **kwargs: func(**kwargs)  # type: ignore[method-assign]
+        provider._fetch_current_manager = lambda ts_code: ("经理甲", "2024-01-01")  # type: ignore[method-assign]
+        provider._build_manager_assignment_rows = lambda ts_code, entity_id, entity_nav_rows: []  # type: ignore[method-assign]
+        provider._fetch_benchmark_rows = lambda month_set: [{"month": month, "benchmark_return_1m": 0.01} for month in month_set]  # type: ignore[method-assign]
+
+        def fake_fetch_entity_monthly_nav_rows(rows: list[dict[str, object]], entity_id: str) -> tuple[float, list[dict[str, object]]]:
+            return 123.0, [
+                {
+                    "entity_id": entity_id,
+                    "month": "2026-02",
+                    "nav_date": "2026-02-28",
+                    "available_date": "2026-02-28",
+                    "nav": 1.0,
+                    "return_1m": 0.02,
+                    "assets_cny_mn": 123.0,
+                }
+            ]
+
+        provider._fetch_entity_monthly_nav_rows = fake_fetch_entity_monthly_nav_rows  # type: ignore[method-assign]
+
+        dataset = provider.fetch()
+
+        progress_path = self._scoped_raw_dir(root, "tushare") / "fetch_progress.json"
+        self.assertTrue(progress_path.exists())
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        self.assertEqual(progress["status"], "completed")
+        self.assertEqual(progress["processed_entities"], 2)
+        self.assertEqual(progress["retained_entities"], 2)
+        self.assertEqual(progress["requested_max_funds"], 2)
+        self.assertEqual(progress["entity_count"], len(dataset.fund_entity_master))
+        self.assertEqual(progress["share_class_count"], len(dataset.fund_share_class_map))
+
     def test_api_call_uses_persisted_disk_cache(self) -> None:
         """验证单接口响应会落到磁盘缓存，并在新 provider 实例中直接命中。"""
         root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
@@ -1923,8 +2014,8 @@ class PipelineTest(unittest.TestCase):
         self.assertAlmostEqual(float(row_map[("EQ", "2026-02")]["excess_ret_12m"]), -0.0101, places=6)
         self.assertAlmostEqual(float(row_map[("MIX", "2026-02")]["excess_ret_12m"]), 0.01515, places=6)
 
-    def test_backtest_uses_weighted_type_mapped_benchmark(self) -> None:
-        """验证回测基准收益会按组合内基金类型权重聚合，而不是固定使用单一指数。"""
+    def test_backtest_uses_default_market_benchmark(self) -> None:
+        """验证回测主口径固定使用 benchmark.default_key，而不是按持仓动态混合 benchmark。"""
         root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
         self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
         config_payload = self._base_config(root)
@@ -1965,8 +2056,8 @@ class PipelineTest(unittest.TestCase):
         rows, _ = run_backtest(config, score_rows, nav_rows, benchmark_rows)
 
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["benchmark_mix"], "broad_equity:0.5|large_cap_equity:0.5")
-        self.assertAlmostEqual(float(rows[0]["benchmark_return"]), 0.015, places=6)
+        self.assertNotIn("benchmark_mix", rows[0])
+        self.assertAlmostEqual(float(rows[0]["benchmark_return"]), 0.02, places=6)
 
 
 if __name__ == "__main__":

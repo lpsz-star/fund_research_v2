@@ -1,6 +1,6 @@
 # `tushare_scoring_v2_lite` Baseline 升级评审记录
 
-本文档用于记录 2026-03-26 对 [`tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json) 的 baseline 升级评审结论。
+本文档用于记录 2026-03-27 对 [`tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json) 的 baseline 升级评审结论。
 
 评审口径依据：
 
@@ -10,7 +10,7 @@
 
 本次记录建立在以下两项口径更新之后：
 
-- 样本规模从 `max_funds=1000` 扩大到 `max_funds=3000`
+- 样本规模从 `max_funds=1000` 扩大到 `max_funds=5000`
 - 回测主 benchmark 改为固定市场 benchmark，不再按组合持仓动态混合 benchmark
 
 ## 1. 评审对象
@@ -24,7 +24,7 @@
 - 数据源：
   - `tushare`
 - 评审日期：
-  - `2026-03-26`
+  - `2026-03-27`
 
 ## 2. 前提核对
 
@@ -39,12 +39,12 @@
 
 补充说明：
 
-- baseline 实验记录生成时间：`2026-03-26T05:17:03Z`
-- `v2-lite` 实验记录生成时间：`2026-03-26T05:17:03Z`
-- 两者使用的 `dataset_snapshot.generated_at` 都是 `2026-03-26T05:11:01Z`
-- 两者 `requested_max_funds = 3000`
-- 两者 `entity_count = 1893`
-- 两者 `share_class_count = 2998`
+- baseline 实验记录生成时间：`2026-03-27T03:36:34Z`
+- `v2-lite` 实验记录生成时间：`2026-03-27T03:36:34Z`
+- 两者使用的 `dataset_snapshot.generated_at` 都是 `2026-03-27T03:18:41Z`
+- 两者 `requested_max_funds = 5000`
+- 两者 `entity_count = 3186`
+- 两者 `share_class_count = 4995`
 - 当前回测主口径固定使用 `benchmark.default_key = broad_equity`
 - 当前固定市场 benchmark 名称：`中证800`
 
@@ -56,25 +56,25 @@
 
 baseline 回测摘要：
 
-- `cumulative_return = 0.335306`
-- `annualized_return = 0.09832`
-- `annualized_volatility = 0.068865`
-- `max_drawdown = -0.065136`
+- `cumulative_return = 0.437317`
+- `annualized_return = 0.124859`
+- `annualized_volatility = 0.0846`
+- `max_drawdown = -0.043211`
 - `benchmark_cumulative_return = 0.196065`
-- `excess_cumulative_return = 0.13924`
+- `excess_cumulative_return = 0.241252`
 
 `v2-lite` 回测摘要：
 
-- `cumulative_return = 0.406786`
-- `annualized_return = 0.117053`
-- `annualized_volatility = 0.082093`
-- `max_drawdown = -0.056967`
+- `cumulative_return = 0.545619`
+- `annualized_return = 0.151677`
+- `annualized_volatility = 0.097508`
+- `max_drawdown = -0.039342`
 - `benchmark_cumulative_return = 0.196065`
-- `excess_cumulative_return = 0.21072`
+- `excess_cumulative_return = 0.349554`
 
 直接观察：
 
-- `v2-lite` 相对 baseline 的累计收益和超额收益仍明显更强，但领先幅度较 `2000` 样本时有所收敛
+- `v2-lite` 相对 baseline 的累计收益和超额收益仍明显更强，且在 `5000` 样本下领先幅度较 `3000` 样本进一步扩大
 - 波动仍高于 baseline
 - 最大回撤反而优于 baseline
 - 在固定市场 benchmark 口径下，benchmark 收益对两套方案完全一致，收益差异更容易解释
@@ -105,12 +105,12 @@ baseline 回测摘要：
 
 观察结果：
 
-- `annualized_volatility` 从 `0.068865` 上升到 `0.082093`
-- `max_drawdown` 从 `-0.065136` 改善到 `-0.056967`
+- `annualized_volatility` 从 `0.0846` 上升到 `0.097508`
+- `max_drawdown` 从 `-0.043211` 改善到 `-0.039342`
 - `turnover_risk_flag = 1`
 - `excess_attribution_assessment = selection_dominant`
 - `benchmark_driven_delta_sum = 0.0`
-- `selection_driven_delta_sum = 0.055471`
+- `selection_driven_delta_sum = 0.076852`
 
 解释：
 
@@ -135,29 +135,29 @@ baseline 回测摘要：
 
 候选补证摘要：
 
-- `style_phase_assessment = partially_concentrated`
+- `style_phase_assessment = broadly_distributed`
 - `window_assessment = window_broad`
-- `recommended_decision = keep_candidate_pending_more_validation`
+- `recommended_decision = ready_for_baseline_review`
 - `selection_dominant = 是`
 - `benchmark_driven_share = 0.0`
-- `positive_window_ratio = 0.807692`
+- `positive_window_ratio = 0.846154`
 
 解释：
 
 - `v2-lite` 现在已经通过时间切片一致性检查
-- `return_concentration_flag = 0`，且 `top3_positive_excess_share = 0.308434`，说明收益不依赖极少数月份
+- `return_concentration_flag = 0`，且 `top3_positive_excess_share = 0.393178`，说明收益不依赖极少数月份
 - 收益改善主要来自 selection，这一点继续成立
-- 但阶段分布仍显示 `partially_concentrated`
-- 候选补证仍未给出“可直接升级”的建议
+- 阶段分布已经从 `partially_concentrated` 改善到 `broadly_distributed`
+- 候选补证已经给出 `ready_for_baseline_review`
 
 判断：
 
-- 与旧版评审相比，稳健性证据明显变强
-- 但当前仍不足以把稳健性直接判成“明确通过”
+- 与 `3000` 样本评审相比，稳健性证据继续变强
+- 当前已经满足“selection 主导 + 非单窗口集中 + 关键阶段多数分布胜出”的要求
 
 结论：
 
-- 稳健性结构：`存疑`
+- 稳健性结构：`通过`
 
 ### 4.4 逻辑可解释性
 
@@ -185,46 +185,46 @@ baseline 回测摘要：
 
 - 收益真实性：`通过`
 - 风险解释充分性：`存疑`
-- 稳健性结构：`存疑`
+- 稳健性结构：`通过`
 - 逻辑可解释性：`通过`
 
 按 [`baseline_upgrade_checklist.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md) 的决策规则：
 
-- `2 个通过 + 2 个存疑`
+- `3 个通过 + 1 个存疑`
 
 对应结论：
 
-- `保留为主候选基线`
+- `可进入升级为 baseline 讨论`
 
 ## 6. 最终决策
 
 决策结论：
 
-- `tushare_scoring_v2_lite` 暂不直接升级为新的默认 baseline
-- 当前更合适的定位是：`保留为主候选基线`
-- 旧 [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json) 继续作为历史参考候选
+- `tushare_scoring_v2_lite` 已具备进入“升级为默认 baseline”正式讨论的条件
+- 当前建议定位上调为：`准备进入 baseline 升级讨论`
+- 在完成最终人工确认前，仍可继续保留旧 [`tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json) 作为对照基线
 
 原因概括：
 
 - `v2-lite` 的收益改善是真实的，且在固定市场 benchmark 口径下仍成立
 - 它的收益改善主要来自 selection，而不是 benchmark 暴露
 - 它比 baseline 更干净，也比旧 `v2` 更少依赖短样本事件因子
-- 扩样本到 `3000` 后，`v2-lite` 仍能保持相对优势，`overall_assessment` 维持 `keep_candidate`
-- 但相较 `2000` 样本时，`v2-lite` 相对 baseline 的累计超额优势收窄约 `3.94pct`
-- 但当前仍存在 `partially_concentrated` 与 `turnover_risk_flag = 1`
-- 候选补证自己的推荐结论仍是 `keep_candidate_pending_more_validation`
+- 扩样本到 `5000` 后，`v2-lite` 相对 baseline 的累计超额优势扩大到 `10.83pct`
+- 候选补证结论已从 `keep_candidate_pending_more_validation` 上调为 `ready_for_baseline_review`
+- `style_phase_assessment` 也从 `partially_concentrated` 改善到 `broadly_distributed`
+- 当前剩余主要疑点不再是收益真实性或稳健性结构，而是更高波动与更高换仓是否可接受
 
-因此，本轮评审继续支持把 `v2-lite` 设为当前主候选，但仍不支持直接升级默认 baseline。
+因此，本轮评审结论从“继续保留为主候选基线”上调为“可以进入升级为 baseline 的正式讨论阶段”。
 
 ## 7. 是否需要更多验证
 
-- 需要
+- 需要，但验证重点已明显收敛
 
 下一步建议聚焦：
 
 - 单独解释 `turnover_risk_flag = 1` 的来源，确认更高换仓是否可接受
-- 继续细化 `partially_concentrated` 对应的风格阶段解释
-- 若后续再次发起升级评审，应继续沿用固定市场 benchmark 口径，不再回退到动态混合 benchmark
+- 对更高波动是否可接受给出业务层判断，而不是继续停留在研究层判断
+- 若正式升级 baseline，应继续沿用固定市场 benchmark 口径，不再回退到动态混合 benchmark
 
 ## 8. 评审引用产物
 

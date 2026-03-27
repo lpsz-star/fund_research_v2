@@ -24,4 +24,4 @@ class PipelineRegressionTest(PipelineTestBase):
     test_fund_basic_and_fund_company_force_refresh_even_if_disk_cache_exists = LegacyPipelineTest.test_fund_basic_and_fund_company_force_refresh_even_if_disk_cache_exists
     # benchmark 类型映射属于最容易被默认回退掩盖的问题，必须长期保留回归约束。
     test_feature_builder_uses_type_mapped_benchmark = LegacyPipelineTest.test_feature_builder_uses_type_mapped_benchmark
-    test_backtest_uses_weighted_type_mapped_benchmark = LegacyPipelineTest.test_backtest_uses_weighted_type_mapped_benchmark
+    test_backtest_uses_default_market_benchmark = LegacyPipelineTest.test_backtest_uses_default_market_benchmark
