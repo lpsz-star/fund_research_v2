@@ -2,6 +2,20 @@
 
 本文档按主题记录已经落地的主要改动，重点说明“改了什么”以及“为什么改”。
 
+## 2026-03-27
+
+### 1. 将 `v2-lite` 正式升级为默认 baseline，并补齐 `10000` 样本决策记录
+
+- 变更内容：
+  - [`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json) 的评分结构正式对齐到 `v2-lite`。
+  - 新增 [`v2_lite_baseline_review_2026-03-27.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-27.md)。
+  - 新增 [`v2_lite_execution_risk_note_2026-03-27.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_execution_risk_note_2026-03-27.md)。
+  - 基于 `requested_max_funds = 10000` 的最新数据快照，重跑 baseline、`v2-lite`、`analyze-robustness` 与 `validate-baseline-candidate`。
+  - `README.md` 同步补充最新评审记录入口。
+- 目的：
+  - 避免继续沿用 `5000` 样本阶段的评审结论，导致升级判断落后于当前样本规模。
+  - 在 `10000` 样本、固定市场 benchmark、补齐执行风险说明后，正式把 `v2-lite` 升级为默认 baseline。
+
 ## 2026-03-26
 
 ### 1. 将 `tushare_scoring_v2_lite` 提升为当前主候选评分体系

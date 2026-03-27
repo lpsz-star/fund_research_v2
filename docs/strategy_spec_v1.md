@@ -74,12 +74,20 @@
   - [`tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
 - 候选优化配置：
   - [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+  - [`tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)
+  - [`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
 
 当前原则是：
 
 - 新因子先进入观察层
 - 因子评价通过后，再通过新配置进入候选评分体系
-- 不直接覆盖旧 baseline
+- 默认 baseline 可以在正式评审后升级
+
+当前默认 baseline 已采用与 `v2-lite` 一致的评分结构：
+
+- `performance_quality`：`excess_ret_12m(0.7)` + `ret_12m(0.3)`
+- `risk_control`：`downside_vol_12m(0.55)` + `worst_3m_avg_return_12m(0.45)`
+- `stability_quality`：`asset_stability_12m(1.0)`
 
 具体因子、类内权重和事件因子缺失处理请看：
 
@@ -111,7 +119,14 @@
 当前 benchmark 已不是单一序列，而是：
 
 - 按基金类型映射到不同指数
-- 回测中按组合持仓聚合为动态混合 benchmark
+- 特征层按基金类型映射使用对应 benchmark
+- 主回测固定使用 `benchmark.default_key` 对应的市场 benchmark
+
+这意味着：
+
+- `excess_ret_12m` 等超额收益类因子，仍可按 `primary_type` 读取对应 benchmark
+- 但回测评估阶段不再按组合持仓动态混合 benchmark
+- 当前默认主回测 benchmark 为 `benchmark.default_key = broad_equity = 中证800`
 
 详细口径请看：
 

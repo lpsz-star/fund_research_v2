@@ -289,37 +289,34 @@
 
 - 真实来源：
   - 配置文件：[`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
-  - 因子明细回退：[`config.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/config.py)
+  - 当前结构来源：`v2-lite` 升级后的默认 baseline
 - 说明：
-  - `tushare.json` 只显式写了类间权重。
-  - 若配置未提供 `ranking.category_factors`，代码会回退到默认评分体系。
+  - `tushare.json` 当前已经显式写出类间权重与类内因子。
+  - 它不再依赖 `config.py` 里的默认因子回退。
 
 类间权重：
 
 | 类别 | 权重 |
 | --- | ---: |
-| `performance_quality` | `0.45` |
+| `performance_quality` | `0.50` |
 | `risk_control` | `0.35` |
-| `stability_quality` | `0.20` |
+| `stability_quality` | `0.15` |
 
 类内因子：
 
 | 类别 | 因子 | 权重 |
 | --- | --- | ---: |
-| `performance_quality` | `ret_12m` | `0.50` |
-| `performance_quality` | `ret_6m` | `0.30` |
-| `performance_quality` | `excess_ret_12m` | `0.20` |
-| `risk_control` | `max_drawdown_12m` | `0.40` |
-| `risk_control` | `vol_12m` | `0.30` |
-| `risk_control` | `downside_vol_12m` | `0.30` |
-| `stability_quality` | `manager_tenure_months` | `0.70` |
-| `stability_quality` | `asset_stability_12m` | `0.30` |
+| `performance_quality` | `excess_ret_12m` | `0.70` |
+| `performance_quality` | `ret_12m` | `0.30` |
+| `risk_control` | `downside_vol_12m` | `0.55` |
+| `risk_control` | `worst_3m_avg_return_12m` | `0.45` |
+| `stability_quality` | `asset_stability_12m` | `1.00` |
 
 设计特点：
 
-- 收益侧以绝对收益为主，超额收益只做辅助。
-- 风险侧用最大回撤、总波动、下行波动三件套。
-- 稳定性侧以经理任期为主，规模稳定为辅。
+- 收益侧从“绝对收益主导”切到“超额收益主导”。
+- 风险侧更关注下行风险和左尾压力，不再保留总波动与最大回撤三件套。
+- 稳定性侧只保留最小必要的规模稳定约束。
 
 ### 3.3 `tushare_scoring_v2`
 

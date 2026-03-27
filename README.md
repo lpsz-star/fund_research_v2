@@ -95,6 +95,8 @@
 15. [docs/candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
 16. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
 17. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
+18. [docs/v2_lite_baseline_review_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-27.md)
+19. [docs/v2_lite_execution_risk_note_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_execution_risk_note_2026-03-27.md)
 
 这些文档分别覆盖：
 
@@ -120,6 +122,8 @@
 - [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)：候选评分是否升级为默认 baseline 的决策清单
 - [v2_baseline_review_2026-03-25.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-25.md)：旧 `tushare_scoring_v2` 在中证800口径下的正式评审记录
 - [v2_lite_baseline_review_2026-03-26.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-26.md)：当前主候选 `tushare_scoring_v2_lite` 是否升级 baseline 的正式评审记录
+- [v2_lite_baseline_review_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-27.md)：`10000` 样本快照下 `v2-lite` 的最新 baseline 升级评审记录
+- [v2_lite_execution_risk_note_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_execution_risk_note_2026-03-27.md)：`v2-lite` 相对 baseline 的执行约束与换手风险说明
 - [v2_min_validation_plan_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_min_validation_plan_2026-03-24.md)：`v2` 下一轮最小验证任务的实施计划
 - [candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)：A/B 两项候选基线验证的输出契约与当前决策规则
 - [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
@@ -166,23 +170,30 @@
 它不会重写整份 raw 快照，而是只根据上一次 `dataset_snapshot.json` 中记录的 `fetch_diagnostics.api_error_samples`，
 对失败的 `ts_code` 重新预热 `fund_manager` / `fund_nav` / `fund_share` 这类单接口缓存，降低下一次全量重跑的无效联网开销。
 
-当前除了默认基线配置，还保留三条候选评分体系配置：
+当前除了默认基线配置，还保留三条非默认评分体系配置：
 
 - [`configs/tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
 - [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)
 - [`configs/tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
 
-它们的用途不是替代默认配置，而是：
+它们的用途主要是：
 
-- 根据因子评价结果重构评分体系
-- 作为候选 baseline 做对照实验
+- 作为历史候选或新候选继续做对照实验
+- 验证不同因子组合是否值得进入下一轮默认 baseline 讨论
 - 观察收益改善是否伴随波动、回撤和换仓恶化
 
-其中当前更值得继续跟踪的主候选是：
+当前默认 baseline 已升级为：
 
-- [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)
+- [`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
 
-原因是它在当前真实样本和中证800 benchmark 口径下，相比旧 `v2` 取得了更高收益，同时去掉了样本偏短的事件型因子 `manager_post_change_excess_delta_12m`。
+它当前采用的评分结构与 [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json) 一致。
+
+本轮升级的原因是：
+
+- 在 `10000` 样本快照下，`v2-lite` 相对旧 baseline 继续保持更高累计收益和超额收益
+- 收益改善来自 `selection-driven excess`，而不是 benchmark 驱动
+- 回撤没有恶化，组合集中度也没有明显变差
+- 最终人工决策接受其“略高换手、略高波动”的风险画像
 
 如果你想快速回答“每个因子是什么意思”“默认、`v2`、`v3` 分别用了哪些因子和权重”，直接看：
 
@@ -589,14 +600,3 @@ make test
 - 回测执行时序
 - CLI 基本入口
 - 缓存读取
-
-## 11. 当前实现中的关键约定
-
-为了与你们的 `AGENTS.md` 保持一致，当前版本明确遵循这些默认约定：
-
-- A/C 份额默认按基金实体归并
-- 同月只在可投资基金之间进行横截面比较
-- 因子只使用当月及历史数据
-- 回测采用“本月信号、下一月执行”
-- 原始输出、特征输出、结果输出分层落盘
-- 实验结果通过 `experiment_registry.jsonl` 追踪
