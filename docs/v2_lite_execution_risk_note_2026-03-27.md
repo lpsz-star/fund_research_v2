@@ -8,8 +8,8 @@
 - baseline：[`tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
 - candidate：[`tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)
 - 主要引用产物：
-  - [`robustness_portfolio_behavior.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_portfolio_behavior.csv)
-  - [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/robustness_report.md)
+  - [`robustness_portfolio_behavior.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_portfolio_behavior.csv)
+  - [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_report.md)
   - [`v2_lite_baseline_review_2026-03-27.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-27.md)
 
 ## 1. 核心结论

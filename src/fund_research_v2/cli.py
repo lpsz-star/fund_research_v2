@@ -41,6 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
     ]:
         command_parser = subparsers.add_parser(command_name)
         command_parser.add_argument("--config", default="configs/default.json")
+        if command_name == "run-experiment":
+            command_parser.add_argument(
+                "--fast",
+                action="store_true",
+                help="跳过因子评估与最近两次实验对比刷新，只保留主链路产物。",
+            )
         if command_name == "serve-web":
             command_parser.add_argument("--host", default="127.0.0.1")
             command_parser.add_argument("--port", type=int, default=8000)
@@ -64,10 +70,12 @@ def main() -> int:
         "run-ranking": run_ranking_command,
         "run-portfolio": run_portfolio_command,
         "run-backtest": run_backtest_command,
-        "run-experiment": run_experiment_command,
     }
     if args.command == "serve-web":
         serve_web_command(config_path, host=args.host, port=args.port)
+        return 0
+    if args.command == "run-experiment":
+        run_experiment_command(config_path, fast_mode=bool(getattr(args, "fast", False)))
         return 0
     command_map[args.command](config_path)
     return 0

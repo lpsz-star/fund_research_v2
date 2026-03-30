@@ -10,14 +10,15 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from fund_research_v2.backtest.engine import run_backtest
+from fund_research_v2.backtest.engine import prepare_backtest_execution_cache, run_backtest
 from fund_research_v2.cli import main
 from fund_research_v2.common.config import load_config
 from fund_research_v2.common.date_utils import add_months, decision_date_for_month, is_available_by_decision_date, is_available_by_month_end, iter_months, latest_completed_month, month_end, month_start
 from fund_research_v2.common.io_utils import read_csv
-from fund_research_v2.common.workflows import analyze_robustness_command, compare_experiments_command, fetch_failed_command, prepare_bundle, run_experiment_command, run_portfolio_command, run_universe_command
+from fund_research_v2.common.workflows import analyze_robustness_command, compare_experiments_command, comparison_dir, factor_evaluation_dir, fetch_failed_command, prepare_bundle, robustness_dir, run_experiment_command, run_portfolio_command, run_universe_command
 from fund_research_v2.data_ingestion.providers import DatasetSnapshot, load_cached_dataset
 from fund_research_v2.data_ingestion.providers import TushareDataProvider
+from fund_research_v2.data_processing.fund_liquidity_classifier import classify_fund_liquidity
 from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
 from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
 from fund_research_v2.evaluation.metrics import summarize_backtest
@@ -40,7 +41,9 @@ class PipelineTest(unittest.TestCase):
                 "allowed_primary_types": ["主动股票", "偏股混合", "灵活配置混合"],
                 "exclude_name_keywords": ["ETF", "联接", "指数", "LOF", "FOF", "QDII", "债", "货币"],
                 "min_history_months": 24,
-                "min_assets_cny_mn": 200.0
+                "min_assets_cny_mn": 200.0,
+                "min_daily_nav_coverage_ratio": 0.6,
+                "daily_nav_coverage_lookback_months": 6,
             },
             "ranking": {
                 "candidate_count": 12,
@@ -139,12 +142,13 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "portfolio_snapshot.json").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "backtest_summary.json").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "backtest_position_audit.csv").exists())
-        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_evaluation.json").exists())
-        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_evaluation.csv").exists())
-        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_distribution.csv").exists())
-        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_bucket_performance.csv").exists())
-        self.assertTrue((self._scoped_output_dir(root, "sample", "result") / "factor_correlation.csv").exists())
-        self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "factor_evaluation_report.md").exists())
+        factor_eval_dir = factor_evaluation_dir(load_config(config_path), root)
+        self.assertTrue((factor_eval_dir / "factor_evaluation.json").exists())
+        self.assertTrue((factor_eval_dir / "factor_evaluation.csv").exists())
+        self.assertTrue((factor_eval_dir / "factor_distribution.csv").exists())
+        self.assertTrue((factor_eval_dir / "factor_bucket_performance.csv").exists())
+        self.assertTrue((factor_eval_dir / "factor_correlation.csv").exists())
+        self.assertTrue((factor_eval_dir / "factor_evaluation_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "portfolio_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "universe_audit_report.md").exists())
         self.assertTrue((self._scoped_output_dir(root, "sample", "reports") / "ingestion_audit_report.md").exists())
@@ -194,9 +198,43 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("Data Quality Diagnostics", backtest_report)
         self.assertIn("Low Confidence Months", backtest_report)
         self.assertIn("Highest Missing Weight Months", backtest_report)
-        self.assertIn("Distribution Diagnostics", (self._scoped_output_dir(root, "sample", "reports") / "factor_evaluation_report.md").read_text(encoding="utf-8"))
-        self.assertIn("Bucket Diagnostics", (self._scoped_output_dir(root, "sample", "reports") / "factor_evaluation_report.md").read_text(encoding="utf-8"))
-        self.assertIn("High Correlation Pairs", (self._scoped_output_dir(root, "sample", "reports") / "factor_evaluation_report.md").read_text(encoding="utf-8"))
+        self.assertIn("Distribution Diagnostics", (factor_eval_dir / "factor_evaluation_report.md").read_text(encoding="utf-8"))
+        self.assertIn("Bucket Diagnostics", (factor_eval_dir / "factor_evaluation_report.md").read_text(encoding="utf-8"))
+        self.assertIn("High Correlation Pairs", (factor_eval_dir / "factor_evaluation_report.md").read_text(encoding="utf-8"))
+
+    def test_run_experiment_fast_skips_heavy_outputs_but_keeps_core_results(self) -> None:
+        """验证快速模式跳过重型附加产物，但保留主链路结果与报告。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_path = self._write_config(root, self._base_config(root))
+
+        run_experiment_command(config_path, fast_mode=True)
+
+        result_dir = self._scoped_output_dir(root, "sample", "result")
+        report_dir = self._scoped_output_dir(root, "sample", "reports")
+        experiment_dir = self._scoped_output_dir(root, "sample", "experiments")
+        factor_eval_dir = factor_evaluation_dir(load_config(config_path), root)
+
+        self.assertTrue((result_dir / "backtest_monthly.csv").exists())
+        self.assertTrue((result_dir / "backtest_summary.json").exists())
+        self.assertTrue((result_dir / "fund_score_monthly.csv").exists())
+        self.assertTrue((result_dir / "portfolio_target_monthly.csv").exists())
+        self.assertTrue((report_dir / "backtest_report.md").exists())
+        self.assertTrue((report_dir / "experiment_report.md").exists())
+        self.assertTrue((experiment_dir / "experiment_registry.jsonl").exists())
+        self.assertFalse((factor_eval_dir / "factor_evaluation.json").exists())
+        self.assertFalse((factor_eval_dir / "factor_evaluation.csv").exists())
+        self.assertFalse((factor_eval_dir / "factor_distribution.csv").exists())
+        self.assertFalse((factor_eval_dir / "factor_bucket_performance.csv").exists())
+        self.assertFalse((factor_eval_dir / "factor_correlation.csv").exists())
+        self.assertFalse((factor_eval_dir / "factor_evaluation_report.md").exists())
+        self.assertFalse((result_dir / "comparison_summary.json").exists())
+        self.assertFalse((result_dir / "backtest_summary_diff.json").exists())
+        self.assertFalse((result_dir / "portfolio_diff.csv").exists())
+        registry_lines = (experiment_dir / "experiment_registry.jsonl").read_text(encoding="utf-8").strip().splitlines()
+        latest_record = json.loads(registry_lines[-1])
+        self.assertEqual(latest_record["factor_evaluation_summary"]["mode"], "fast")
+        self.assertEqual(latest_record["factor_evaluation_summary"]["skipped"], 1)
 
     def test_compare_experiments_writes_diff_artifacts(self) -> None:
         """验证最近两次实验可以被结构化比较，并输出对比报告和差异文件。"""
@@ -252,19 +290,18 @@ class PipelineTest(unittest.TestCase):
 
         compare_experiments_command(config_path)
 
-        result_dir = self._scoped_output_dir(root, "sample", "result")
-        report_dir = self._scoped_output_dir(root, "sample", "reports")
-        self.assertTrue((result_dir / "comparison_summary.json").exists())
-        self.assertTrue((result_dir / "backtest_summary_diff.json").exists())
-        self.assertTrue((result_dir / "type_baseline_diff.json").exists())
-        self.assertTrue((result_dir / "portfolio_diff.csv").exists())
-        self.assertTrue((report_dir / "comparison_report.md").exists())
-        report_text = (report_dir / "comparison_report.md").read_text(encoding="utf-8")
+        output_dir = comparison_dir(load_config(config_path), root)
+        self.assertTrue((output_dir / "comparison_summary.json").exists())
+        self.assertTrue((output_dir / "backtest_summary_diff.json").exists())
+        self.assertTrue((output_dir / "type_baseline_diff.json").exists())
+        self.assertTrue((output_dir / "portfolio_diff.csv").exists())
+        self.assertTrue((output_dir / "comparison_report.md").exists())
+        report_text = (output_dir / "comparison_report.md").read_text(encoding="utf-8")
         self.assertIn("Comparison Report", report_text)
         self.assertIn("Config Diff", report_text)
         self.assertIn("Portfolio Diff", report_text)
         self.assertIn("Backtest Reliability Diff", report_text)
-        diff_payload = json.loads((result_dir / "backtest_summary_diff.json").read_text(encoding="utf-8"))
+        diff_payload = json.loads((output_dir / "backtest_summary_diff.json").read_text(encoding="utf-8"))
         self.assertEqual(diff_payload["cumulative_return"]["delta"], 0.03)
         self.assertEqual(diff_payload["max_missing_weight"]["delta"], 0.12)
 
@@ -276,6 +313,15 @@ class PipelineTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         mocked_command.assert_called_once_with(Path("configs/default.json"))
+
+    def test_cli_dispatches_run_experiment_fast_mode(self) -> None:
+        """验证 CLI 会把 --fast 显式传给实验工作流，而不是偷偷改变默认行为。"""
+        with mock.patch("fund_research_v2.cli.run_experiment_command") as mocked_command:
+            with mock.patch.object(sys, "argv", ["fund_research_v2", "run-experiment", "--config", "configs/default.json", "--fast"]):
+                exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        mocked_command.assert_called_once_with(Path("configs/default.json"), fast_mode=True)
 
     def test_cli_dispatches_analyze_robustness_command(self) -> None:
         """验证 CLI 已暴露稳健性分析入口。"""
@@ -392,17 +438,16 @@ class PipelineTest(unittest.TestCase):
 
         analyze_robustness_command(candidate_path)
 
-        result_dir = self._scoped_output_dir(root, "sample", "result")
-        report_dir = self._scoped_output_dir(root, "sample", "reports")
-        self.assertTrue((result_dir / "robustness_summary.json").exists())
-        self.assertTrue((result_dir / "robustness_time_slices.csv").exists())
-        self.assertTrue((result_dir / "robustness_month_contribution.csv").exists())
-        self.assertTrue((result_dir / "robustness_portfolio_behavior.csv").exists())
-        self.assertTrue((result_dir / "robustness_factor_regime.csv").exists())
-        self.assertTrue((report_dir / "robustness_report.md").exists())
-        summary = json.loads((result_dir / "robustness_summary.json").read_text(encoding="utf-8"))
+        output_dir = robustness_dir(load_config(candidate_path), root)
+        self.assertTrue((output_dir / "robustness_summary.json").exists())
+        self.assertTrue((output_dir / "robustness_time_slices.csv").exists())
+        self.assertTrue((output_dir / "robustness_month_contribution.csv").exists())
+        self.assertTrue((output_dir / "robustness_portfolio_behavior.csv").exists())
+        self.assertTrue((output_dir / "robustness_factor_regime.csv").exists())
+        self.assertTrue((output_dir / "robustness_report.md").exists())
+        summary = json.loads((output_dir / "robustness_summary.json").read_text(encoding="utf-8"))
         self.assertIn("overall_assessment", summary)
-        report_text = (report_dir / "robustness_report.md").read_text(encoding="utf-8")
+        report_text = (output_dir / "robustness_report.md").read_text(encoding="utf-8")
         self.assertIn("Robustness Report", report_text)
 
     def test_cli_dispatches_fetch_failed_command(self) -> None:
@@ -456,6 +501,148 @@ class PipelineTest(unittest.TestCase):
         reason_map = {str(row["entity_id"]): str(row["reason_codes"]) for row in latest_rows}
 
         self.assertIn("holding_period_restricted", reason_map["E006"])
+
+    def test_liquidity_classifier_marks_dingkai_funds_as_restricted(self) -> None:
+        """验证名称中带定开/定期开放的基金会被识别为流动性受限。"""
+        for fund_name in [
+            "东方红锦丰优选两年定开",
+            "广发全球科技三个月定开A人民币",
+            "信澳博见成长一年定开",
+            "某某定期开放混合",
+        ]:
+            liquidity = classify_fund_liquidity(fund_name)
+            self.assertEqual(int(liquidity["liquidity_restricted"]), 1)
+            self.assertGreaterEqual(int(liquidity["holding_lock_months"]), 1)
+
+    def test_universe_filters_sparse_daily_nav_coverage_even_without_name_rule(self) -> None:
+        """验证即使名称未命中持有期关键词，历史日频净值过稀也会在基金池层被排除。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["universe"]["min_history_months"] = 1
+        config = load_config(self._write_config(root, config_payload))
+        dataset = DatasetSnapshot(
+            fund_entity_master=[
+                {
+                    "entity_id": "SPARSE",
+                    "entity_name": "稀疏净值基金",
+                    "primary_type": "主动股票",
+                    "fund_company": "测试基金",
+                    "manager_name": "经理甲",
+                    "manager_start_month": "2023-01",
+                    "inception_month": "2023-01",
+                    "latest_assets_cny_mn": 500.0,
+                    "liquidity_restricted": 0,
+                    "holding_lock_months": 0,
+                    "status": "L",
+                }
+            ],
+            fund_share_class_map=[],
+            fund_nav_monthly=[
+                {"entity_id": "SPARSE", "month": "2026-01", "nav_date": "2026-01-30", "available_date": "2026-01-31", "nav": 1.0, "return_1m": 0.01, "assets_cny_mn": 500.0},
+                {"entity_id": "SPARSE", "month": "2026-02", "nav_date": "2026-02-27", "available_date": "2026-02-28", "nav": 1.01, "return_1m": 0.01, "assets_cny_mn": 500.0},
+            ],
+            fund_nav_pit_daily=[
+                {"entity_id": "SPARSE", "trade_date": "2026-01-05", "available_date": "2026-01-05", "daily_return": 0.001},
+                {"entity_id": "SPARSE", "trade_date": "2026-01-30", "available_date": "2026-01-31", "daily_return": 0.001},
+                {"entity_id": "SPARSE", "trade_date": "2026-02-06", "available_date": "2026-02-06", "daily_return": 0.001},
+                {"entity_id": "SPARSE", "trade_date": "2026-02-27", "available_date": "2026-02-28", "daily_return": 0.001},
+            ],
+            benchmark_monthly=[{"month": "2026-01", "benchmark_return_1m": 0.0}, {"month": "2026-02", "benchmark_return_1m": 0.0}],
+            manager_assignment_monthly=[],
+            fund_type_audit=[],
+            fund_liquidity_audit=[],
+            trade_calendar=[
+                {"exchange": "SSE", "cal_date": "2026-01-05", "is_open": 1, "pretrade_date": "2026-01-02"},
+                {"exchange": "SSE", "cal_date": "2026-01-06", "is_open": 1, "pretrade_date": "2026-01-05"},
+                {"exchange": "SSE", "cal_date": "2026-01-07", "is_open": 1, "pretrade_date": "2026-01-06"},
+                {"exchange": "SSE", "cal_date": "2026-01-30", "is_open": 1, "pretrade_date": "2026-01-29"},
+                {"exchange": "SSE", "cal_date": "2026-02-02", "is_open": 1, "pretrade_date": "2026-01-30"},
+                {"exchange": "SSE", "cal_date": "2026-02-06", "is_open": 1, "pretrade_date": "2026-02-05"},
+                {"exchange": "SSE", "cal_date": "2026-02-09", "is_open": 1, "pretrade_date": "2026-02-06"},
+                {"exchange": "SSE", "cal_date": "2026-02-27", "is_open": 1, "pretrade_date": "2026-02-26"},
+                {"exchange": "SSE", "cal_date": "2026-03-02", "is_open": 1, "pretrade_date": "2026-02-27"},
+            ],
+            metadata={},
+        )
+
+        universe = build_universe(config, dataset)
+        row_map = {str(row["month"]): row for row in universe.rows}
+
+        self.assertIn("sparse_daily_nav_coverage", str(row_map["2026-02"]["reason_codes"]))
+        self.assertLess(float(row_map["2026-02"]["trailing_daily_nav_coverage_ratio"]), 0.6)
+
+    def test_universe_prefers_precomputed_daily_nav_coverage_monthly(self) -> None:
+        """验证存在预计算覆盖率月表时，基金池不再依赖逐月回扫日频净值。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["universe"]["min_history_months"] = 1
+        config = load_config(self._write_config(root, config_payload))
+        dataset = DatasetSnapshot(
+            fund_entity_master=[
+                {
+                    "entity_id": "PRECOMP",
+                    "entity_name": "预计算覆盖率基金",
+                    "primary_type": "主动股票",
+                    "fund_company": "测试基金",
+                    "manager_name": "经理甲",
+                    "manager_start_month": "2023-01",
+                    "inception_month": "2023-01",
+                    "latest_assets_cny_mn": 500.0,
+                    "liquidity_restricted": 0,
+                    "holding_lock_months": 0,
+                    "status": "L",
+                }
+            ],
+            fund_share_class_map=[],
+            fund_nav_monthly=[
+                {"entity_id": "PRECOMP", "month": "2026-01", "nav_date": "2026-01-30", "available_date": "2026-01-31", "nav": 1.0, "return_1m": 0.01, "assets_cny_mn": 500.0},
+                {"entity_id": "PRECOMP", "month": "2026-02", "nav_date": "2026-02-27", "available_date": "2026-02-28", "nav": 1.01, "return_1m": 0.01, "assets_cny_mn": 500.0},
+            ],
+            fund_nav_pit_daily=[],
+            fund_nav_daily_coverage_monthly=[
+                {
+                    "entity_id": "PRECOMP",
+                    "month": "2026-01",
+                    "decision_date": "2026-02-02",
+                    "lookback_months": 6,
+                    "trailing_daily_nav_coverage_ratio": 1.0,
+                    "trailing_daily_nav_coverage_months": 1,
+                },
+                {
+                    "entity_id": "PRECOMP",
+                    "month": "2026-02",
+                    "decision_date": "2026-03-02",
+                    "lookback_months": 6,
+                    "trailing_daily_nav_coverage_ratio": 0.25,
+                    "trailing_daily_nav_coverage_months": 2,
+                },
+            ],
+            benchmark_monthly=[{"month": "2026-01", "benchmark_return_1m": 0.0}, {"month": "2026-02", "benchmark_return_1m": 0.0}],
+            manager_assignment_monthly=[],
+            fund_type_audit=[],
+            fund_liquidity_audit=[],
+            trade_calendar=[
+                {"exchange": "SSE", "cal_date": "2026-01-05", "is_open": 1, "pretrade_date": "2026-01-02"},
+                {"exchange": "SSE", "cal_date": "2026-01-06", "is_open": 1, "pretrade_date": "2026-01-05"},
+                {"exchange": "SSE", "cal_date": "2026-01-07", "is_open": 1, "pretrade_date": "2026-01-06"},
+                {"exchange": "SSE", "cal_date": "2026-01-30", "is_open": 1, "pretrade_date": "2026-01-29"},
+                {"exchange": "SSE", "cal_date": "2026-02-02", "is_open": 1, "pretrade_date": "2026-01-30"},
+                {"exchange": "SSE", "cal_date": "2026-02-06", "is_open": 1, "pretrade_date": "2026-02-05"},
+                {"exchange": "SSE", "cal_date": "2026-02-09", "is_open": 1, "pretrade_date": "2026-02-06"},
+                {"exchange": "SSE", "cal_date": "2026-02-27", "is_open": 1, "pretrade_date": "2026-02-26"},
+                {"exchange": "SSE", "cal_date": "2026-03-02", "is_open": 1, "pretrade_date": "2026-02-27"},
+            ],
+            metadata={},
+        )
+
+        universe = build_universe(config, dataset)
+        row_map = {str(row["month"]): row for row in universe.rows}
+
+        self.assertEqual(float(row_map["2026-02"]["trailing_daily_nav_coverage_ratio"]), 0.25)
+        self.assertEqual(int(row_map["2026-02"]["trailing_daily_nav_coverage_months"]), 2)
+        self.assertIn("sparse_daily_nav_coverage", str(row_map["2026-02"]["reason_codes"]))
 
     def test_universe_uses_visible_month_asset_instead_of_latest_asset(self) -> None:
         """验证基金池规模门槛使用当月可见规模，而不是实体主表中的最新规模。"""
@@ -1157,6 +1344,89 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(len(position_audit_rows), 1)
         self.assertEqual(int(position_audit_rows[0]["missing_trade_date_count"]), 0)
         self.assertEqual(str(position_audit_rows[0]["outcome_status"]), "observed_return")
+
+    def test_backtest_prepared_execution_cache_matches_direct_daily_path(self) -> None:
+        """验证 prepared execution cache 只优化路径，不改变回测结果。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["backtest"]["start_month"] = "2026-01"
+        config_payload["backtest"]["end_month"] = "2026-02"
+        config_payload["backtest"]["transaction_cost_bps"] = 0.0
+        config_payload["portfolio"]["portfolio_size"] = 1
+        config_payload["portfolio"]["single_fund_cap"] = 1.0
+        config = load_config(self._write_config(root, config_payload))
+        score_rows = [
+            {
+                "entity_id": "ONLY",
+                "month": "2026-01",
+                "entity_name": "唯一基金",
+                "fund_company": "测试基金",
+                "primary_type": "主动股票",
+                "rank": 1,
+                "total_score": 1.0,
+            }
+        ]
+        nav_daily_rows = [
+            {"entity_id": "ONLY", "trade_date": "2026-02-05", "daily_return": 0.01},
+            {"entity_id": "ONLY", "trade_date": "2026-02-08", "daily_return": 0.02},
+            {"entity_id": "ONLY", "trade_date": "2026-03-02", "daily_return": -0.01},
+        ]
+        benchmark_rows = [
+            {"month": "2026-01", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.0},
+            {"month": "2026-02", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.0},
+            {"month": "2026-03", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.0},
+        ]
+        trade_calendar_rows = [
+            {"exchange": "SSE", "cal_date": "2026-02-02", "is_open": 1, "pretrade_date": "2026-01-30"},
+            {"exchange": "SSE", "cal_date": "2026-02-03", "is_open": 1, "pretrade_date": "2026-02-02"},
+            {"exchange": "SSE", "cal_date": "2026-02-04", "is_open": 1, "pretrade_date": "2026-02-03"},
+            {"exchange": "SSE", "cal_date": "2026-02-05", "is_open": 1, "pretrade_date": "2026-02-04"},
+            {"exchange": "SSE", "cal_date": "2026-02-08", "is_open": 1, "pretrade_date": "2026-02-05"},
+            {"exchange": "SSE", "cal_date": "2026-03-02", "is_open": 1, "pretrade_date": "2026-02-08"},
+        ]
+
+        direct_rows, direct_audit_rows = run_backtest(
+            config,
+            score_rows,
+            nav_rows=[],
+            benchmark_rows=benchmark_rows,
+            trade_calendar_rows=trade_calendar_rows,
+            nav_daily_rows=nav_daily_rows,
+        )
+        prepared_cache = prepare_backtest_execution_cache(
+            config=config,
+            benchmark_rows=benchmark_rows,
+            trade_calendar_rows=trade_calendar_rows,
+            nav_daily_rows=nav_daily_rows,
+            months=["2026-01", "2026-02"],
+        )
+        cached_rows, cached_audit_rows = run_backtest(
+            config,
+            score_rows,
+            nav_rows=[],
+            benchmark_rows=benchmark_rows,
+            trade_calendar_rows=trade_calendar_rows,
+            prepared_execution_cache=prepared_cache,
+        )
+
+        self.assertEqual(direct_rows, cached_rows)
+        self.assertEqual(direct_audit_rows, cached_audit_rows)
+
+    def test_prepare_bundle_builds_prepared_execution_cache_for_daily_dataset(self) -> None:
+        """验证主 workflow 会提前准备回测执行 cache，供主回测和验证模块复用。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_path = self._write_config(root, self._base_config(root))
+
+        bundle = prepare_bundle(config_path)
+
+        prepared_cache = bundle.get("prepared_execution_cache")
+        self.assertIsNotNone(prepared_cache)
+        assert prepared_cache is not None
+        self.assertTrue(len(prepared_cache.open_trade_dates) > 0)
+        self.assertTrue(len(prepared_cache.daily_return_lookup) > 0)
+        self.assertTrue(len(prepared_cache.schedule_by_month) > 0)
 
     def test_backtest_uses_continuous_months_and_records_empty_portfolio_months(self) -> None:
         """验证回测按完整月历推进，即使中间月份没有评分结果也会显式写出空仓期。"""

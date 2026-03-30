@@ -7,9 +7,11 @@ class PipelineIntegrationTest(PipelineTestBase):
 
     # 完整实验与对比工作流，验证跨模块主链路可以产出一整套研究结果。
     test_run_experiment_writes_outputs = LegacyPipelineTest.test_run_experiment_writes_outputs
+    test_run_experiment_fast_skips_heavy_outputs_but_keeps_core_results = LegacyPipelineTest.test_run_experiment_fast_skips_heavy_outputs_but_keeps_core_results
     test_compare_experiments_writes_diff_artifacts = LegacyPipelineTest.test_compare_experiments_writes_diff_artifacts
     # CLI 路由测试只关心命令是否正确分发到 workflow 入口。
     test_cli_dispatches_compare_experiments_command = LegacyPipelineTest.test_cli_dispatches_compare_experiments_command
+    test_cli_dispatches_run_experiment_fast_mode = LegacyPipelineTest.test_cli_dispatches_run_experiment_fast_mode
     test_cli_dispatches_analyze_robustness_command = LegacyPipelineTest.test_cli_dispatches_analyze_robustness_command
     # 这些测试覆盖“命令 -> 输出文件/报告”的协同行为，而不是单个纯函数。
     test_fetch_failed_command_writes_retry_summary_and_report = LegacyPipelineTest.test_fetch_failed_command_writes_retry_summary_and_report

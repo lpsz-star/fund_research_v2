@@ -4,6 +4,57 @@
 
 ## 2026-03-30
 
+### 5. 基金池新增 `fund_nav_daily_coverage_monthly` 预计算月表
+
+- 变更内容：
+  - `DatasetSnapshot` 与 raw 缓存契约新增 `fund_nav_daily_coverage_monthly`，`sample` 和 `tushare` 都会落盘 `fund_nav_daily_coverage_monthly.csv`。
+  - 新增共享预计算逻辑，基于 `fund_nav_pit_daily`、`trade_calendar` 和当前覆盖率窗口，提前生成逐实体逐月的历史日频净值覆盖率。
+  - 基金池构建时优先直接读取该月表；只有旧缓存缺失该表或窗口不匹配时，才回退到原先的逐月扫描日频 PIT 逻辑。
+  - 新增回归测试，覆盖 raw 回读和“基金池优先使用预计算月表”的路径。
+- 目的：
+  - 降低 `build_universe()` 在 `tushare` 大样本下反复扫描数百万行日频 PIT 的开销。
+  - 保持覆盖率定义、`decision_date` 边界和基金池过滤结果不变，只把计算位置前移到数据层。
+
+### 6. 回测层新增 `prepared_execution_cache` 复用日频执行索引
+
+- 变更内容：
+  - 回测引擎新增 `prepare_backtest_execution_cache()` 与 `BacktestExecutionCache`，把交易日索引、实体日收益 lookup、benchmark 日频代理 lookup 和逐月执行日程统一预计算。
+  - `run_backtest()` 新增可选 `prepared_execution_cache` 入参；主实验、稳健性分析、候选验证都会优先复用 bundle 中已准备好的 cache。
+  - 新增回归测试，验证 prepared cache 路径与旧的直接日频路径产出完全一致。
+- 目的：
+  - 消除同一实验内主回测、候选验证、稳健性分析对同一份日频 PIT 和交易日历的重复预处理开销。
+  - 保持 `T / T+2 / T+3` 执行语义、benchmark 代理方式和金额口径不变，只优化重复构建索引的成本。
+
+### 7. 稳健性分析产物迁移到独立目录
+
+- 变更内容：
+  - `analyze-robustness` 不再把 CSV/JSON 写到 `result/`、Markdown 写到 `reports/`。
+  - 当前所有稳健性分析产物统一写入 `outputs/<data_source>/robustness/`。
+  - `workflow`、测试与核心文档引用已同步更新。
+- 目的：
+  - 把稳健性分析从主实验结果目录中拆出来，方便后续集中查看与归档。
+  - 降低 `result/`、`reports/` 目录里主链路产物与诊断产物混杂的问题。
+
+### 8. 因子评估产物迁移到独立目录
+
+- 变更内容：
+  - 完整实验生成的 `factor_evaluation.json/csv`、分布表、分桶表、相关性表和 `factor_evaluation_report.md` 不再写入 `result/` 与 `reports/`。
+  - 当前统一写入 `outputs/<data_source>/factor_evaluation/`。
+  - 主 workflow、测试和核心文档引用已同步调整。
+- 目的：
+  - 把因子诊断产物从主策略结果目录中拆分出来，便于和回测/组合主产物分层查看。
+  - 与 `robustness/`、`candidate_validation/` 的目录组织保持一致。
+
+### 9. 实验对比产物迁移到独立目录
+
+- 变更内容：
+  - `comparison_summary.json`、`backtest_summary_diff.json`、`type_baseline_diff.json`、`portfolio_diff.csv` 与 `comparison_report.md` 不再写入 `result/` 与 `reports/`。
+  - 当前统一写入 `outputs/<data_source>/comparison/`。
+  - 自动 comparison 刷新、测试和核心文档引用已同步调整。
+- 目的：
+  - 把“最近两次实验比较”的差异产物从主结果目录中拆分出来，降低 `result/` 和 `reports/` 的信息混杂。
+  - 与 `robustness/`、`factor_evaluation/`、`candidate_validation/` 的目录组织保持一致。
+
 ### 3. 回测层切换到 `decision_date / T+2 / T+3` 研究执行代理
 
 - 变更内容：
@@ -16,6 +67,17 @@
 - 目的：
   - 把“卖出含当日收益、买入不含当日收益”的研究语义真正落实到回测层，而不是继续停留在月频近似。
   - 让回测、基金池、特征层共享同一套 `decision_date` 与 PIT 净值版本口径，降低时间边界漂移风险。
+
+### 4. 新增 `run-experiment --fast` 快速模式
+
+- 变更内容：
+  - `run-experiment` 新增 `--fast` 参数，`Makefile` 新增 `make run-tushare-fast`。
+  - 快速模式仍会执行完整主链路：数据加载、基金池、特征、评分、组合、回测、核心结果文件和核心报告。
+  - 快速模式会跳过当前最重但不影响主回测结果的附加产物：因子评估、因子评估报告、最近两次实验 comparison 刷新。
+  - 实验记录会显式标记当前为 fast 模式，避免把“缺少因子评估产物”误读成异常失败。
+- 目的：
+  - 缩短 `tushare` 全链路日常迭代时间，优先服务“调规则、看组合、看回测”的高频研究动作。
+  - 保持主链路金融口径不变，只优化执行路径和附加产物开销。
 
 ### 1. 接入交易日历原始缓存，并落地 fund_nav 的首个可见版本选择规则
 

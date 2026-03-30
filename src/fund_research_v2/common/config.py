@@ -14,6 +14,8 @@ class UniverseConfig:
     exclude_name_keywords: list[str]
     min_history_months: int
     min_assets_cny_mn: float
+    min_daily_nav_coverage_ratio: float
+    daily_nav_coverage_lookback_months: int
 
 
 @dataclass(frozen=True)
@@ -158,7 +160,14 @@ def load_config(path: Path) -> AppConfig:
         data_source=raw.get("data_source", "sample"),
         lookback_months=int(raw.get("lookback_months", 48)),
         local_secret_path=Path(raw.get("local_secret_path", "configs/local.json")),
-        universe=UniverseConfig(**raw["universe"]),
+        universe=UniverseConfig(
+            allowed_primary_types=raw["universe"]["allowed_primary_types"],
+            exclude_name_keywords=raw["universe"]["exclude_name_keywords"],
+            min_history_months=int(raw["universe"]["min_history_months"]),
+            min_assets_cny_mn=float(raw["universe"]["min_assets_cny_mn"]),
+            min_daily_nav_coverage_ratio=float(raw["universe"].get("min_daily_nav_coverage_ratio", 0.6)),
+            daily_nav_coverage_lookback_months=int(raw["universe"].get("daily_nav_coverage_lookback_months", 6)),
+        ),
         ranking=RankingConfig(
             candidate_count=int(raw["ranking"]["candidate_count"]),
             factor_weights={key: float(value) for key, value in raw["ranking"]["factor_weights"].items()},
@@ -243,6 +252,10 @@ def _validate(config: AppConfig) -> None:
         raise ValueError("portfolio.single_company_max 必须大于 0。")
     if config.portfolio.single_fund_cap <= 0 or config.portfolio.single_fund_cap > 1:
         raise ValueError("portfolio.single_fund_cap 必须位于 (0, 1]。")
+    if config.universe.min_daily_nav_coverage_ratio <= 0 or config.universe.min_daily_nav_coverage_ratio > 1:
+        raise ValueError("universe.min_daily_nav_coverage_ratio 必须位于 (0, 1]。")
+    if config.universe.daily_nav_coverage_lookback_months <= 0:
+        raise ValueError("universe.daily_nav_coverage_lookback_months 必须大于 0。")
     if sum(config.ranking.factor_weights.values()) <= 0:
         raise ValueError("ranking.factor_weights 总和必须大于 0。")
     if not config.ranking.category_factors:

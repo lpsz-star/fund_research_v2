@@ -3,6 +3,7 @@ import sys
 import tempfile
 from pathlib import Path
 import unittest
+from unittest import mock
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -169,8 +170,29 @@ class TradeCalendarAndNavSelectionTest(PipelineTestBase):
         assert loaded is not None
         self.assertTrue(len(loaded.trade_calendar) > 0)
         self.assertTrue(len(loaded.fund_nav_pit_daily) > 0)
+        self.assertTrue(len(loaded.fund_nav_daily_coverage_monthly) > 0)
         self.assertIn("cal_date", loaded.trade_calendar[0])
         self.assertIn("trade_date", loaded.fund_nav_pit_daily[0])
+        self.assertIn("trailing_daily_nav_coverage_ratio", loaded.fund_nav_daily_coverage_monthly[0])
+
+    def test_load_cached_dataset_prefers_binary_snapshot_cache(self) -> None:
+        """验证 raw 层存在二进制快照时，加载路径不会再回扫大 CSV。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-binary-cache-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_path = self._write_config(root, self._base_config(root))
+        config = load_config(config_path)
+        dataset = generate_sample_dataset(config.lookback_months, config.benchmark)
+
+        persist_dataset(config, root, dataset)
+
+        with mock.patch("fund_research_v2.data_ingestion.providers.read_csv", side_effect=AssertionError("should use pickle cache")):
+            loaded = load_cached_dataset(config, root)
+
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(len(loaded.fund_nav_monthly), len(dataset.fund_nav_monthly))
+        self.assertEqual(len(loaded.fund_nav_pit_daily), len(dataset.fund_nav_pit_daily))
+        self.assertEqual(len(loaded.fund_nav_daily_coverage_monthly), len(dataset.fund_nav_daily_coverage_monthly))
 
     def test_month_end_nav_announced_on_next_day_is_eligible_by_first_trading_day(self) -> None:
         """验证月末净值若在下月第 1 个交易日公告，仍可用于该估值月信号。"""

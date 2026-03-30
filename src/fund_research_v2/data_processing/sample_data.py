@@ -3,6 +3,7 @@ from __future__ import annotations
 from fund_research_v2.common.config import BenchmarkConfig, benchmark_to_serializable_dict
 from fund_research_v2.common.contracts import DatasetSnapshot
 from fund_research_v2.common.date_utils import add_months, current_timestamp, generate_weekday_trade_calendar, month_end
+from fund_research_v2.data_processing.daily_nav_coverage import build_daily_nav_coverage_monthly
 from fund_research_v2.data_processing.fund_liquidity_classifier import classify_fund_liquidity
 from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
 
@@ -181,6 +182,13 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
                 }
             )
 
+    daily_coverage_rows = build_daily_nav_coverage_monthly(
+        nav_monthly_rows=nav_rows,
+        nav_daily_rows=nav_pit_daily_rows,
+        trade_calendar_rows=trade_calendar_rows,
+        lookback_months=6,
+    )
+
     return DatasetSnapshot(
         fund_entity_master=fund_entity_master,
         fund_share_class_map=share_class_map,
@@ -191,6 +199,7 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
         fund_liquidity_audit=fund_liquidity_audit_rows,
         trade_calendar=trade_calendar_rows,
         fund_nav_pit_daily=nav_pit_daily_rows,
+        fund_nav_daily_coverage_monthly=daily_coverage_rows,
         metadata={
             "source_name": "sample",
             "generated_at": current_timestamp(),
@@ -239,6 +248,11 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
                 "start_date": trade_calendar_rows[0]["cal_date"],
                 "end_date": trade_calendar_rows[-1]["cal_date"],
                 "open_day_count": sum(int(row["is_open"]) for row in trade_calendar_rows),
+            },
+            "daily_nav_coverage_monthly": {
+                "lookback_months": 6,
+                "row_count": len(daily_coverage_rows),
+                "source": "precomputed_from_fund_nav_pit_daily",
             },
         },
     )

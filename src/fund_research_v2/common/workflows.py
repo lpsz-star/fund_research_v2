@@ -4,7 +4,7 @@ from collections import Counter
 import subprocess
 from pathlib import Path
 
-from fund_research_v2.backtest.engine import run_backtest
+from fund_research_v2.backtest.engine import prepare_backtest_execution_cache, run_backtest
 from fund_research_v2.common.config import AppConfig, load_config, scope_artifact_dir, to_serializable_dict
 from fund_research_v2.common.date_utils import current_timestamp, latest_completed_month
 from fund_research_v2.common.io_utils import append_jsonl, ensure_directories, write_csv, write_json
@@ -77,21 +77,23 @@ def analyze_robustness_command(config_path: Path) -> None:
     candidate_config: AppConfig = candidate_bundle["config"]
     project_root: Path = candidate_bundle["project_root"]
     ensure_directories(all_artifact_dirs(candidate_config, project_root))
+    robustness_output_dir = robustness_dir(candidate_config, project_root)
+    ensure_directories([robustness_output_dir])
     analysis = build_robustness_analysis(
         candidate_config=candidate_bundle["config"],
         baseline_config=baseline_bundle["config"],
         dataset=candidate_bundle["dataset"],
         candidate_score_rows=candidate_bundle["score_rows"],
         baseline_score_rows=baseline_bundle["score_rows"],
+        candidate_execution_cache=candidate_bundle.get("prepared_execution_cache"),
+        baseline_execution_cache=baseline_bundle.get("prepared_execution_cache"),
     )
-    result_dir = artifact_dir(candidate_config, project_root, candidate_config.paths.result_dir)
-    report_dir = artifact_dir(candidate_config, project_root, candidate_config.paths.report_dir)
-    write_json(result_dir / "robustness_summary.json", analysis.get("summary", {}))
-    write_csv(result_dir / "robustness_time_slices.csv", analysis.get("time_slice_rows", []))
-    write_csv(result_dir / "robustness_month_contribution.csv", analysis.get("month_contribution_rows", []))
-    write_csv(result_dir / "robustness_portfolio_behavior.csv", analysis.get("portfolio_behavior_rows", []))
-    write_csv(result_dir / "robustness_factor_regime.csv", analysis.get("factor_regime_rows", []))
-    render_robustness_report(report_dir / "robustness_report.md", analysis)
+    write_json(robustness_output_dir / "robustness_summary.json", analysis.get("summary", {}))
+    write_csv(robustness_output_dir / "robustness_time_slices.csv", analysis.get("time_slice_rows", []))
+    write_csv(robustness_output_dir / "robustness_month_contribution.csv", analysis.get("month_contribution_rows", []))
+    write_csv(robustness_output_dir / "robustness_portfolio_behavior.csv", analysis.get("portfolio_behavior_rows", []))
+    write_csv(robustness_output_dir / "robustness_factor_regime.csv", analysis.get("factor_regime_rows", []))
+    render_robustness_report(robustness_output_dir / "robustness_report.md", analysis)
 
 
 def validate_baseline_candidate_command(config_path: Path) -> None:
@@ -110,6 +112,8 @@ def validate_baseline_candidate_command(config_path: Path) -> None:
         dataset=candidate_bundle["dataset"],
         candidate_score_rows=candidate_bundle["score_rows"],
         baseline_score_rows=baseline_bundle["score_rows"],
+        candidate_execution_cache=candidate_bundle.get("prepared_execution_cache"),
+        baseline_execution_cache=baseline_bundle.get("prepared_execution_cache"),
     )
     write_json(validation_dir / "candidate_validation_summary.json", validation.get("summary", {}))
     write_csv(validation_dir / "style_phase_summary.csv", validation.get("style_phase_summary_rows", []))
@@ -185,12 +189,13 @@ def run_backtest_command(config_path: Path) -> None:
         benchmark_rows=bundle["dataset"].benchmark_monthly,
         trade_calendar_rows=bundle["dataset"].trade_calendar,
         nav_daily_rows=bundle["dataset"].fund_nav_pit_daily,
+        prepared_execution_cache=bundle.get("prepared_execution_cache"),
     )
     backtest_summary = summarize_backtest(backtest_rows)
     write_full_outputs(bundle, backtest_rows, position_audit_rows, backtest_summary, [])
 
 
-def run_experiment_command(config_path: Path) -> None:
+def run_experiment_command(config_path: Path, fast_mode: bool = False) -> None:
     """执行完整实验流程，包括组合、回测、报告和实验记录。"""
     bundle = prepare_bundle(config_path)
     latest_month = _latest_research_month(bundle["config"], bundle["score_rows"])
@@ -204,9 +209,10 @@ def run_experiment_command(config_path: Path) -> None:
         benchmark_rows=bundle["dataset"].benchmark_monthly,
         trade_calendar_rows=bundle["dataset"].trade_calendar,
         nav_daily_rows=bundle["dataset"].fund_nav_pit_daily,
+        prepared_execution_cache=bundle.get("prepared_execution_cache"),
     )
     backtest_summary = summarize_backtest(backtest_rows)
-    write_full_outputs(bundle, backtest_rows, position_audit_rows, backtest_summary, portfolio_rows)
+    write_full_outputs(bundle, backtest_rows, position_audit_rows, backtest_summary, portfolio_rows, fast_mode=fast_mode)
 
 
 def prepare_bundle(config_path: Path) -> dict[str, object]:
@@ -219,6 +225,15 @@ def prepare_bundle(config_path: Path) -> dict[str, object]:
     universe = build_universe(config, dataset)
     feature_rows = build_feature_rows(config, dataset, universe)
     score_rows = score_funds(config, feature_rows)
+    prepared_execution_cache = None
+    if dataset.trade_calendar and dataset.fund_nav_pit_daily:
+        prepared_execution_cache = prepare_backtest_execution_cache(
+            config=config,
+            benchmark_rows=dataset.benchmark_monthly,
+            trade_calendar_rows=dataset.trade_calendar,
+            nav_daily_rows=dataset.fund_nav_pit_daily,
+            months=sorted({str(row.get("month") or "") for row in score_rows if str(row.get("month") or "")}),
+        )
     return {
         "config": config,
         "project_root": project_root,
@@ -226,6 +241,7 @@ def prepare_bundle(config_path: Path) -> dict[str, object]:
         "universe": universe,
         "feature_rows": feature_rows,
         "score_rows": score_rows,
+        "prepared_execution_cache": prepared_execution_cache,
     }
 
 
@@ -282,6 +298,7 @@ def write_full_outputs(
     position_audit_rows: list[dict[str, object]],
     backtest_summary: dict[str, object],
     portfolio_rows: list[dict[str, object]],
+    fast_mode: bool = False,
 ) -> None:
     """把完整实验产生的特征、结果、报告和实验记录一次性写出。"""
     config: AppConfig = bundle["config"]
@@ -304,12 +321,22 @@ def write_full_outputs(
     write_csv(result_dir / "backtest_monthly.csv", backtest_rows)
     write_csv(result_dir / "backtest_position_audit.csv", position_audit_rows)
     write_json(result_dir / "backtest_summary.json", backtest_summary)
-    factor_evaluation = evaluate_factors(feature_rows, dataset.fund_nav_monthly)
-    write_json(result_dir / "factor_evaluation.json", factor_evaluation)
-    write_csv(result_dir / "factor_evaluation.csv", factor_evaluation.get("factor_rows", []))
-    write_csv(result_dir / "factor_distribution.csv", factor_evaluation.get("distribution_rows", []))
-    write_csv(result_dir / "factor_bucket_performance.csv", factor_evaluation.get("bucket_rows", []))
-    write_csv(result_dir / "factor_correlation.csv", factor_evaluation.get("correlation_rows", []))
+    factor_eval_dir = factor_evaluation_dir(config, project_root)
+    if fast_mode:
+        factor_evaluation = {
+            "summary": {
+                "mode": "fast",
+                "skipped": 1,
+                "reason": "run-experiment --fast 跳过因子评估与对比刷新，只保留主链路产物。",
+            }
+        }
+    else:
+        factor_evaluation = evaluate_factors(feature_rows, dataset.fund_nav_monthly)
+        write_json(factor_eval_dir / "factor_evaluation.json", factor_evaluation)
+        write_csv(factor_eval_dir / "factor_evaluation.csv", factor_evaluation.get("factor_rows", []))
+        write_csv(factor_eval_dir / "factor_distribution.csv", factor_evaluation.get("distribution_rows", []))
+        write_csv(factor_eval_dir / "factor_bucket_performance.csv", factor_evaluation.get("bucket_rows", []))
+        write_csv(factor_eval_dir / "factor_correlation.csv", factor_evaluation.get("correlation_rows", []))
     type_baseline = build_type_baseline_snapshot(
         dataset.fund_entity_master,
         bundle["universe"].rows,
@@ -318,9 +345,11 @@ def write_full_outputs(
     write_json(result_dir / "type_baseline_snapshot.json", type_baseline)
     experiment_record = build_experiment_record(config, project_root, dataset.metadata, backtest_summary, portfolio_rows, type_baseline, factor_evaluation)
     append_jsonl(artifact_dir(config, project_root, config.paths.experiment_dir) / "experiment_registry.jsonl", experiment_record)
-    _refresh_latest_comparison_outputs(config, project_root)
+    if not fast_mode:
+        _refresh_latest_comparison_outputs(config, project_root)
     render_backtest_report(artifact_dir(config, project_root, config.paths.report_dir) / "backtest_report.md", backtest_rows, backtest_summary)
-    render_factor_evaluation_report(artifact_dir(config, project_root, config.paths.report_dir) / "factor_evaluation_report.md", factor_evaluation)
+    if not fast_mode:
+        render_factor_evaluation_report(factor_eval_dir / "factor_evaluation_report.md", factor_evaluation)
     render_experiment_report(
         artifact_dir(config, project_root, config.paths.report_dir) / "experiment_report.md",
         config=config,
@@ -335,18 +364,17 @@ def write_full_outputs(
 def _refresh_latest_comparison_outputs(config: AppConfig, project_root: Path) -> None:
     """把最近两次完整实验的差异产物刷新到当前数据源的 comparison 文件。"""
     experiment_dir = artifact_dir(config, project_root, config.paths.experiment_dir)
-    result_dir = artifact_dir(config, project_root, config.paths.result_dir)
-    report_dir = artifact_dir(config, project_root, config.paths.report_dir)
+    output_dir = comparison_dir(config, project_root)
     records = read_experiment_records(experiment_dir / "experiment_registry.jsonl")
     if len(records) < 2:
         return
     hydrated_records = _hydrate_portfolio_summary(records)
     comparison = build_experiment_comparison(hydrated_records)
-    write_json(result_dir / "comparison_summary.json", comparison.get("summary", {}))
-    write_json(result_dir / "backtest_summary_diff.json", comparison.get("backtest_summary_diff", {}))
-    write_json(result_dir / "type_baseline_diff.json", comparison.get("type_baseline_diff", {}))
-    write_csv(result_dir / "portfolio_diff.csv", comparison.get("portfolio_diff_rows", []))
-    render_comparison_report(report_dir / "comparison_report.md", comparison)
+    write_json(output_dir / "comparison_summary.json", comparison.get("summary", {}))
+    write_json(output_dir / "backtest_summary_diff.json", comparison.get("backtest_summary_diff", {}))
+    write_json(output_dir / "type_baseline_diff.json", comparison.get("type_baseline_diff", {}))
+    write_csv(output_dir / "portfolio_diff.csv", comparison.get("portfolio_diff_rows", []))
+    render_comparison_report(output_dir / "comparison_report.md", comparison)
 
 
 def write_portfolio_outputs(
@@ -504,6 +532,9 @@ def all_artifact_dirs(config: AppConfig, project_root: Path) -> list[Path]:
         artifact_dir(config, project_root, config.paths.result_dir),
         artifact_dir(config, project_root, config.paths.report_dir),
         artifact_dir(config, project_root, config.paths.experiment_dir),
+        robustness_dir(config, project_root),
+        factor_evaluation_dir(config, project_root),
+        comparison_dir(config, project_root),
     ]
 
 
@@ -515,6 +546,21 @@ def artifact_dir(config: AppConfig, project_root: Path, base_dir: Path) -> Path:
 def candidate_validation_dir(config: AppConfig, project_root: Path) -> Path:
     """返回候选 baseline 验证的独立产物目录。"""
     return artifact_dir(config, project_root, config.paths.result_dir).parent / "candidate_validation"
+
+
+def robustness_dir(config: AppConfig, project_root: Path) -> Path:
+    """返回稳健性分析的独立产物目录。"""
+    return artifact_dir(config, project_root, config.paths.result_dir).parent / "robustness"
+
+
+def factor_evaluation_dir(config: AppConfig, project_root: Path) -> Path:
+    """返回因子评估的独立产物目录。"""
+    return artifact_dir(config, project_root, config.paths.result_dir).parent / "factor_evaluation"
+
+
+def comparison_dir(config: AppConfig, project_root: Path) -> Path:
+    """返回实验对比的独立产物目录。"""
+    return artifact_dir(config, project_root, config.paths.result_dir).parent / "comparison"
 
 
 def git_commit_hash(project_root: Path) -> str:

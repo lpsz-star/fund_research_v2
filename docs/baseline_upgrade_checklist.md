@@ -73,10 +73,10 @@
 推荐先核对：
 
 - `dataset_snapshot.json`
-- `comparison_report.md`
-- `robustness_summary.json`
-- `candidate_validation_summary.json`
-- `factor_evaluation.json`
+- `outputs/<data_source>/comparison/comparison_report.md`
+- `outputs/<data_source>/robustness/robustness_summary.json`
+- `outputs/<data_source>/candidate_validation/candidate_validation_summary.json`
+- `outputs/<data_source>/factor_evaluation/factor_evaluation.json`
 
 ## 4. 四道硬门槛
 

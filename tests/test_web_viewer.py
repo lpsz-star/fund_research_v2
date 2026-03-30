@@ -65,6 +65,9 @@ class WebViewerTest(PipelineTestBase):
         self.assertEqual(overview_status, "200 OK")
         self.assertIn("Research Overview", overview_body)
         self.assertIn("Backtest Summary", overview_body)
+        self.assertIn("Research Sections", overview_body)
+        self.assertIn("factor_evaluation/factor_evaluation_report.md", overview_body)
+        self.assertIn("comparison/comparison_report.md", overview_body)
         self.assertEqual(backtest_status, "200 OK")
         self.assertIn("Backtest Analysis", backtest_body)
         self.assertIn("Monthly Returns", backtest_body)
@@ -75,6 +78,7 @@ class WebViewerTest(PipelineTestBase):
         self.assertEqual(reports_status, "200 OK")
         self.assertIn("Markdown Reports", reports_body)
         self.assertIn("reports / backtest_report.md", reports_body)
+        self.assertIn("factor_evaluation / factor_evaluation_report.md", reports_body)
 
     def test_web_viewer_handles_missing_outputs(self) -> None:
         """验证在尚未生成回测和组合产物时，页面会给出明确提示而不是崩溃。"""

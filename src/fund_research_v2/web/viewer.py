@@ -9,7 +9,7 @@ from wsgiref.simple_server import make_server
 
 from fund_research_v2.common.config import AppConfig, load_config
 from fund_research_v2.common.io_utils import read_csv, read_json
-from fund_research_v2.common.workflows import artifact_dir, candidate_validation_dir, resolve_project_root
+from fund_research_v2.common.workflows import artifact_dir, candidate_validation_dir, comparison_dir, factor_evaluation_dir, resolve_project_root, robustness_dir
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,9 @@ class OutputRepository:
         self.report_dir = artifact_dir(config, project_root, config.paths.report_dir)
         self.experiment_dir = artifact_dir(config, project_root, config.paths.experiment_dir)
         self.validation_dir = candidate_validation_dir(config, project_root)
+        self.robustness_dir = robustness_dir(config, project_root)
+        self.factor_evaluation_dir = factor_evaluation_dir(config, project_root)
+        self.comparison_dir = comparison_dir(config, project_root)
         self.output_root = self.result_dir.parent
 
     def artifact_status(self, relative_path: str, label: str, hint: str) -> ArtifactStatus:
@@ -131,6 +134,26 @@ def render_overview_page(repository: OutputRepository) -> tuple[str, str]:
     summary = repository.read_json("result/backtest_summary.json") or {}
     portfolio = repository.read_json("result/portfolio_snapshot.json") or {}
     latest_positions = portfolio.get("portfolio", []) if isinstance(portfolio.get("portfolio"), list) else []
+    factor_eval_status = repository.artifact_status(
+        "factor_evaluation/factor_evaluation_report.md",
+        "因子评估",
+        "运行完整实验且非 --fast 模式后，会生成因子评估产物。",
+    )
+    robustness_status = repository.artifact_status(
+        "robustness/robustness_report.md",
+        "稳健性分析",
+        "运行 `analyze-robustness` 后，会生成稳健性分析产物。",
+    )
+    validation_status = repository.artifact_status(
+        "candidate_validation/candidate_validation_report.md",
+        "候选补证",
+        "运行 `validate-baseline-candidate` 后，会生成候选补证产物。",
+    )
+    comparison_status = repository.artifact_status(
+        "comparison/comparison_report.md",
+        "实验对比",
+        "至少有两次完整实验记录后，才会生成实验对比产物。",
+    )
     context_rows = parse_markdown_key_values(report_text, "## Experiment Context") if report_text else []
     benchmark_rows = parse_markdown_key_values(report_text, "## Benchmark Mapping") if report_text else []
     summary_rows = [(key, str(value)) for key, value in summary.items()]
@@ -146,6 +169,15 @@ def render_overview_page(repository: OutputRepository) -> tuple[str, str]:
         render_artifact_card(portfolio_status),
         render_summary_card("Output Root", str(repository.output_root)),
         "</section>",
+        "<section class='panel'>",
+        "<h2>Research Sections</h2>",
+        "<p>Diagnostic outputs are now grouped into independent folders for faster browsing and cleaner separation from main strategy results.</p>",
+        "<div class='grid two'>",
+        render_report_entry_card(factor_eval_status, "factor_evaluation/factor_evaluation_report.md"),
+        render_report_entry_card(robustness_status, "robustness/robustness_report.md"),
+        render_report_entry_card(validation_status, "candidate_validation/candidate_validation_report.md"),
+        render_report_entry_card(comparison_status, "comparison/comparison_report.md"),
+        "</div></section>",
         "<section class='grid two'>",
         render_definition_table("Experiment Context", context_rows, "Run a full experiment to populate this section."),
         render_definition_table("Benchmark Mapping", benchmark_rows, "Benchmark details appear after experiment outputs exist."),
@@ -430,6 +462,12 @@ def render_page(title: str, repository: OutputRepository, body: str) -> str:
     .artifact-card, .metric-card, .summary-card, .panel {{ padding: 20px; }}
     .artifact-card h3, .panel h2 {{ margin-top: 0; }}
     .artifact-card p, .summary-card p, .metric-card p, .panel p, .empty-copy {{ color: var(--muted); }}
+    .inline-link {{
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }}
+    .muted-inline {{ color: var(--muted); }}
     .status-pill {{
       display: inline-block;
       padding: 4px 10px;
@@ -547,6 +585,25 @@ def render_artifact_card(status: ArtifactStatus) -> str:
         f"<h3>{escape(status.label)}</h3>"
         f"<p>{escape(str(status.path))}</p>"
         f"<p>{escape('Available for browser view.' if status.exists else status.hint)}</p>"
+        "</article>"
+    )
+
+
+def render_report_entry_card(status: ArtifactStatus, report_relative_path: str) -> str:
+    """渲染首页研究分区入口卡片。"""
+    status_label = "ready" if status.exists else "missing"
+    status_class = "status-pill" if status.exists else "status-pill missing"
+    action = (
+        f"<a class='inline-link' href='/reports?path={quote(report_relative_path)}'>Open report</a>"
+        if status.exists
+        else f"<span class='muted-inline'>{escape(status.hint)}</span>"
+    )
+    return (
+        "<article class='artifact-card'>"
+        f"<div class='{status_class}'>{escape(status_label)}</div>"
+        f"<h3>{escape(status.label)}</h3>"
+        f"<p>{escape(str(status.path))}</p>"
+        f"<p>{action}</p>"
         "</article>"
     )
 

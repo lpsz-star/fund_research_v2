@@ -138,7 +138,7 @@
 
 负责本地浏览器展示：
 
-- 读取 `result/`、`reports/` 与 `candidate_validation/` 产物
+- 读取 `result/`、`reports/` 以及 `factor_evaluation/`、`robustness/`、`candidate_validation/`、`comparison/` 等独立诊断目录产物
 - 提供实验总览、回测浏览、最新组合和 Markdown 报告页面
 - 仅做只读视图装配与 HTML 渲染，不重定义研究口径
 

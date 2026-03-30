@@ -69,6 +69,10 @@ baseline 的选择规则由 [`default_baseline_config_path()`](/Users/liupeng/.c
 - `robustness_factor_regime.csv`
 - `robustness_summary.json`
 
+这些产物当前统一写入独立目录：
+
+- `outputs/<data_source>/robustness/`
+
 ## 4. 四类诊断分别在看什么
 
 ### 4.1 时间切片比较
@@ -320,14 +324,14 @@ baseline 的选择规则由 [`default_baseline_config_path()`](/Users/liupeng/.c
 
 如果要评估一个候选评分体系是否接近 baseline 升级条件，建议按下面顺序阅读：
 
-1. `robustness_summary.json`
-2. `robustness_report.md`
-3. `robustness_time_slices.csv`
-4. `robustness_month_contribution.csv`
-5. `robustness_portfolio_behavior.csv`
-6. `robustness_factor_regime.csv`
-7. `comparison_report.md`
-8. `factor_evaluation.json`
+1. `outputs/<data_source>/robustness/robustness_summary.json`
+2. `outputs/<data_source>/robustness/robustness_report.md`
+3. `outputs/<data_source>/robustness/robustness_time_slices.csv`
+4. `outputs/<data_source>/robustness/robustness_month_contribution.csv`
+5. `outputs/<data_source>/robustness/robustness_portfolio_behavior.csv`
+6. `outputs/<data_source>/robustness/robustness_factor_regime.csv`
+7. `outputs/<data_source>/comparison/comparison_report.md`
+8. `outputs/<data_source>/factor_evaluation/factor_evaluation.json`
 
 推荐这样读的原因是：
 

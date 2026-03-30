@@ -30,6 +30,9 @@ def _extract_holding_lock_months(fund_name: str) -> int | None:
         (r"(\d+)年持有期?", 12),
         (r"(\d+)个月持有期?", 1),
         (r"(\d+)月持有期?", 1),
+        (r"(\d+)年定开", 12),
+        (r"(\d+)个月定开", 1),
+        (r"(\d+)月定开", 1),
     ]
     for pattern, multiplier in digit_patterns:
         matched = re.search(pattern, fund_name)
@@ -43,6 +46,12 @@ def _extract_holding_lock_months(fund_name: str) -> int | None:
         ("三年持有", 36),
         ("三个月持有", 3),
         ("六个月持有", 6),
+        ("一年定开", 12),
+        ("二年定开", 24),
+        ("两年定开", 24),
+        ("三年定开", 36),
+        ("三个月定开", 3),
+        ("六个月定开", 6),
         ("一年持有期", 12),
         ("二年持有期", 24),
         ("两年持有期", 24),
@@ -56,5 +65,8 @@ def _extract_holding_lock_months(fund_name: str) -> int | None:
 
     if "持有期" in fund_name or "滚动持有" in fund_name:
         # 名称已显式提示存在持有约束，即使未能准确抽出月数，也不应被当作高流动性产品。
+        return 1
+    if "定开" in fund_name or "定期开放" in fund_name or "封闭运作" in fund_name or "封闭期" in fund_name:
+        # 无法精确抽月数时也应按受限产品处理，避免明显的定开基金漏进月频调仓策略。
         return 1
     return None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import pickle
 from pathlib import Path
 from typing import Iterable
 
@@ -40,6 +41,19 @@ def read_csv(path: Path) -> list[dict[str, object]]:
     """读取 CSV 并返回字典列表。"""
     with path.open("r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def write_pickle(path: Path, payload: object) -> None:
+    """以二进制格式写入本地缓存，用于加速大表加载。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def read_pickle(path: Path) -> object:
+    """读取本地二进制缓存。"""
+    with path.open("rb") as handle:
+        return pickle.load(handle)
 
 
 def append_jsonl(path: Path, payload: object) -> None:

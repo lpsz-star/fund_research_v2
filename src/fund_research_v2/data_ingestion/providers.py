@@ -14,7 +14,8 @@ from typing import Any
 from fund_research_v2.common.config import AppConfig, benchmark_to_serializable_dict, scope_artifact_dir
 from fund_research_v2.common.contracts import DatasetSnapshot
 from fund_research_v2.common.date_utils import add_months, current_timestamp, month_end
-from fund_research_v2.common.io_utils import read_csv, read_json, write_csv, write_json
+from fund_research_v2.common.io_utils import read_csv, read_json, read_pickle, write_csv, write_json, write_pickle
+from fund_research_v2.data_processing.daily_nav_coverage import build_daily_nav_coverage_monthly
 from fund_research_v2.data_processing.fund_liquidity_classifier import classify_fund_liquidity
 from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
 from fund_research_v2.data_processing.sample_data import generate_sample_dataset
@@ -89,6 +90,7 @@ def warm_failed_api_cache(config: AppConfig, project_root: Path) -> dict[str, ob
 def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapshot | None:
     """从 raw 层读取已缓存的数据快照。"""
     raw_dir = project_root / scope_artifact_dir(config.paths.raw_dir, config.data_source)
+    binary_snapshot_path = raw_dir / "dataset_snapshot.pkl"
     entity_path = raw_dir / "fund_entity_master.csv"
     share_path = raw_dir / "fund_share_class_map.csv"
     nav_path = raw_dir / "fund_nav_monthly.csv"
@@ -98,6 +100,7 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
     fund_type_audit_path = raw_dir / "fund_type_audit.csv"
     fund_liquidity_audit_path = raw_dir / "fund_liquidity_audit.csv"
     trade_calendar_path = raw_dir / "trade_calendar.csv"
+    coverage_path = raw_dir / "fund_nav_daily_coverage_monthly.csv"
     snapshot_path = raw_dir / "dataset_snapshot.json"
     required_paths = [entity_path, share_path, nav_path, benchmark_path, manager_path, snapshot_path]
     if not all(path.exists() for path in required_paths):
@@ -110,6 +113,16 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
     if aligned_metadata != metadata:
         write_json(snapshot_path, aligned_metadata)
     metadata = aligned_metadata
+    if binary_snapshot_path.exists():
+        cached_snapshot = read_pickle(binary_snapshot_path)
+        if isinstance(cached_snapshot, DatasetSnapshot):
+            return _ensure_daily_nav_coverage_cache(
+                config=config,
+                raw_dir=raw_dir,
+                snapshot_path=snapshot_path,
+                coverage_path=coverage_path,
+                dataset=_align_binary_snapshot_metadata(cached_snapshot, metadata),
+            )
     entity_rows = read_csv(entity_path)
     share_rows = read_csv(share_path)
     fund_type_audit_rows = read_csv(fund_type_audit_path) if fund_type_audit_path.exists() else _build_fund_type_audit_from_entity_cache(entity_rows, share_rows)
@@ -117,7 +130,7 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
     entity_rows = _hydrate_entity_liquidity_fields(entity_rows, fund_liquidity_audit_rows)
     if isinstance(metadata, dict) and not isinstance(metadata.get("fund_liquidity_audit_summary"), dict):
         metadata["fund_liquidity_audit_summary"] = _build_fund_liquidity_summary(fund_liquidity_audit_rows)
-    return DatasetSnapshot(
+    dataset = DatasetSnapshot(
         fund_entity_master=entity_rows,
         fund_share_class_map=share_rows,
         fund_nav_monthly=read_csv(nav_path),
@@ -127,7 +140,15 @@ def load_cached_dataset(config: AppConfig, project_root: Path) -> DatasetSnapsho
         fund_type_audit=fund_type_audit_rows,
         fund_liquidity_audit=fund_liquidity_audit_rows,
         trade_calendar=read_csv(trade_calendar_path) if trade_calendar_path.exists() else [],
+        fund_nav_daily_coverage_monthly=read_csv(coverage_path) if coverage_path.exists() else [],
         metadata=metadata,
+    )
+    return _ensure_daily_nav_coverage_cache(
+        config=config,
+        raw_dir=raw_dir,
+        snapshot_path=snapshot_path,
+        coverage_path=coverage_path,
+        dataset=dataset,
     )
 
 
@@ -144,7 +165,10 @@ def persist_dataset(config: AppConfig, project_root: Path, dataset: DatasetSnaps
     write_csv(raw_dir / "fund_type_audit.csv", dataset.fund_type_audit)
     write_csv(raw_dir / "fund_liquidity_audit.csv", dataset.fund_liquidity_audit)
     write_csv(raw_dir / "trade_calendar.csv", dataset.trade_calendar)
+    write_csv(raw_dir / "fund_nav_daily_coverage_monthly.csv", dataset.fund_nav_daily_coverage_monthly)
     write_json(raw_dir / "dataset_snapshot.json", dataset.metadata)
+    # CSV 继续作为可审计底稿保留，额外写一份二进制快照只用于加速本地加载。
+    write_pickle(raw_dir / "dataset_snapshot.pkl", dataset)
 
 
 def _load_tushare_token(path: Path) -> str:
@@ -203,6 +227,68 @@ def _align_cached_snapshot_metadata(config: AppConfig, metadata: object) -> dict
     aligned["benchmark_series"] = benchmark_config["series"]
     aligned["benchmark_primary_type_map"] = config.benchmark.primary_type_map
     return aligned
+
+
+def _align_binary_snapshot_metadata(dataset: DatasetSnapshot, metadata: dict[str, object]) -> DatasetSnapshot:
+    """把二进制快照的 metadata 对齐到当前配置校验后的 JSON 元信息。"""
+    return DatasetSnapshot(
+        fund_entity_master=dataset.fund_entity_master,
+        fund_share_class_map=dataset.fund_share_class_map,
+        fund_nav_monthly=dataset.fund_nav_monthly,
+        benchmark_monthly=dataset.benchmark_monthly,
+        manager_assignment_monthly=dataset.manager_assignment_monthly,
+        fund_type_audit=dataset.fund_type_audit,
+        metadata=metadata,
+        fund_liquidity_audit=dataset.fund_liquidity_audit,
+        trade_calendar=dataset.trade_calendar,
+        fund_nav_pit_daily=dataset.fund_nav_pit_daily,
+        fund_nav_daily_coverage_monthly=dataset.fund_nav_daily_coverage_monthly,
+    )
+
+
+def _ensure_daily_nav_coverage_cache(
+    config: AppConfig,
+    raw_dir: Path,
+    snapshot_path: Path,
+    coverage_path: Path,
+    dataset: DatasetSnapshot,
+) -> DatasetSnapshot:
+    """为旧 raw 缓存补齐覆盖率月表，避免必须重新联网抓数才能提速。"""
+    if dataset.fund_nav_daily_coverage_monthly:
+        return dataset
+    if not dataset.trade_calendar or not dataset.fund_nav_pit_daily or not dataset.fund_nav_monthly:
+        return dataset
+    coverage_rows = build_daily_nav_coverage_monthly(
+        nav_monthly_rows=dataset.fund_nav_monthly,
+        nav_daily_rows=dataset.fund_nav_pit_daily,
+        trade_calendar_rows=dataset.trade_calendar,
+        lookback_months=config.universe.daily_nav_coverage_lookback_months,
+    )
+    if not coverage_rows:
+        return dataset
+    metadata = dict(dataset.metadata)
+    metadata["daily_nav_coverage_monthly"] = {
+        "lookback_months": config.universe.daily_nav_coverage_lookback_months,
+        "row_count": len(coverage_rows),
+        "source": "precomputed_from_fund_nav_pit_daily",
+    }
+    enriched_dataset = DatasetSnapshot(
+        fund_entity_master=dataset.fund_entity_master,
+        fund_share_class_map=dataset.fund_share_class_map,
+        fund_nav_monthly=dataset.fund_nav_monthly,
+        benchmark_monthly=dataset.benchmark_monthly,
+        manager_assignment_monthly=dataset.manager_assignment_monthly,
+        fund_type_audit=dataset.fund_type_audit,
+        metadata=metadata,
+        fund_liquidity_audit=dataset.fund_liquidity_audit,
+        trade_calendar=dataset.trade_calendar,
+        fund_nav_pit_daily=dataset.fund_nav_pit_daily,
+        fund_nav_daily_coverage_monthly=coverage_rows,
+    )
+    write_csv(coverage_path, coverage_rows)
+    write_json(snapshot_path, metadata)
+    write_pickle(raw_dir / "dataset_snapshot.pkl", enriched_dataset)
+    return enriched_dataset
 
 
 class TushareDataProvider:
@@ -392,6 +478,12 @@ class TushareDataProvider:
 
             month_set = sorted({str(row["month"]) for row in nav_rows})
             trade_calendar_rows = self._fetch_trade_calendar_rows(month_set)
+            daily_coverage_rows = build_daily_nav_coverage_monthly(
+                nav_monthly_rows=nav_rows,
+                nav_daily_rows=nav_daily_rows,
+                trade_calendar_rows=trade_calendar_rows,
+                lookback_months=self.config.universe.daily_nav_coverage_lookback_months,
+            )
             benchmark_rows = self._fetch_benchmark_rows(month_set)
             if not fund_entity_master or not nav_rows:
                 raise RuntimeError("Tushare 基金数据未形成有效的实体主表或月频净值表。")
@@ -465,6 +557,11 @@ class TushareDataProvider:
                     "end_date": trade_calendar_rows[-1]["cal_date"] if trade_calendar_rows else "",
                     "open_day_count": sum(int(str(row.get("is_open") or "0")) for row in trade_calendar_rows),
                 },
+                "daily_nav_coverage_monthly": {
+                    "lookback_months": self.config.universe.daily_nav_coverage_lookback_months,
+                    "row_count": len(daily_coverage_rows),
+                    "source": "precomputed_from_fund_nav_pit_daily",
+                },
             }
             self._write_fetch_progress(
                 status="completed",
@@ -491,6 +588,7 @@ class TushareDataProvider:
                 fund_type_audit=fund_type_audit_rows,
                 fund_liquidity_audit=fund_liquidity_audit_rows,
                 trade_calendar=trade_calendar_rows,
+                fund_nav_daily_coverage_monthly=daily_coverage_rows,
                 metadata=metadata,
             )
         except Exception as exc:

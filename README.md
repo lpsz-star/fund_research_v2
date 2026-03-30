@@ -138,6 +138,18 @@
 
 这样做是为了避免跑完真实数据后，又被后续 `sample` 验证流程覆盖结果。
 
+当前 `outputs/<data_source>/` 目录也已按产物职责进一步分层：
+
+- `clean/`：标准化后的研究输入
+- `feature/`：月频特征层
+- `result/`：主策略结果，如评分、组合、回测摘要
+- `reports/`：主链路 Markdown 报告
+- `experiments/`：实验登记与追踪
+- `factor_evaluation/`：因子评估诊断
+- `robustness/`：稳健性分析
+- `candidate_validation/`：候选 baseline 补证
+- `comparison/`：最近两次实验的结构化对比
+
 接入层现在还会额外输出一份标准审计产物：
 
 - `outputs/<data_source>/reports/ingestion_audit_report.md`
@@ -220,7 +232,7 @@ fund_research_v2/
 ├─ docs/                 # 中文设计与口径文档
 ├─ tests/                # 单元与流程测试
 ├─ data/raw/             # 原始或接近原始的数据缓存
-└─ outputs/              # clean/feature/result/reports/experiments
+└─ outputs/              # clean/feature/result/reports/experiments + 独立诊断目录
 ```
 
 ## 5. 研究主流程
@@ -286,7 +298,7 @@ make run-sample
 运行完成后，建议优先查看：
 
 - [outputs/sample/reports/experiment_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/experiment_report.md)
-- [outputs/sample/reports/factor_evaluation_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/factor_evaluation_report.md)
+- [outputs/sample/factor_evaluation/factor_evaluation_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_evaluation_report.md)
 - [outputs/sample/reports/portfolio_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/portfolio_report.md)
 - [outputs/sample/reports/universe_audit_report.md](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
 

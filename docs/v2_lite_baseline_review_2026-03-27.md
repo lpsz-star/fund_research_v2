@@ -229,8 +229,8 @@ baseline 回测摘要：
 
 ## 8. 评审引用产物
 
-- [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/comparison_report.md)
-- [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/robustness_report.md)
+- [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/comparison/comparison_report.md)
+- [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_report.md)
 - [`candidate_validation_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/candidate_validation/candidate_validation_report.md)
 - [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/data/raw/tushare/dataset_snapshot.json)
 - [`experiment_registry.jsonl`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/experiments/experiment_registry.jsonl)

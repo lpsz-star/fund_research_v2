@@ -1,11 +1,22 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from math import prod
 
 from fund_research_v2.common.config import AppConfig
 from fund_research_v2.common.date_utils import decision_date_for_month, iter_months, month_start, next_trading_day, shift_trading_days
 from fund_research_v2.portfolio.construction import build_portfolio
+
+
+@dataclass(frozen=True)
+class BacktestExecutionCache:
+    """回测执行代理共享的只读索引缓存。"""
+    open_trade_dates: list[str]
+    trade_date_index: dict[str, int]
+    daily_return_lookup: dict[tuple[str, str], float]
+    benchmark_daily_lookup: dict[tuple[str, str], float]
+    schedule_by_month: dict[str, dict[str, object]]
 
 
 def run_backtest(
@@ -15,17 +26,61 @@ def run_backtest(
     benchmark_rows: list[dict[str, object]],
     trade_calendar_rows: list[dict[str, object]] | None = None,
     nav_daily_rows: list[dict[str, object]] | None = None,
+    prepared_execution_cache: BacktestExecutionCache | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """执行历史回测；若提供交易日历和 PIT 日频净值，则使用新执行代理口径。"""
-    if trade_calendar_rows and nav_daily_rows:
+    if prepared_execution_cache is not None:
+        if not trade_calendar_rows:
+            raise ValueError("prepared_execution_cache 需要同时提供 trade_calendar_rows。")
         return _run_backtest_with_daily_execution(
             config=config,
             score_rows=score_rows,
             benchmark_rows=benchmark_rows,
             trade_calendar_rows=trade_calendar_rows,
-            nav_daily_rows=nav_daily_rows,
+            prepared_execution_cache=prepared_execution_cache,
+        )
+    if trade_calendar_rows and nav_daily_rows:
+        available_months = sorted({str(row["month"]) for row in score_rows} | {str(row["month"]) for row in benchmark_rows})
+        if not available_months:
+            return [], []
+        start_month = config.backtest.start_month or available_months[0]
+        end_month = config.backtest.end_month or available_months[-1]
+        return _run_backtest_with_daily_execution(
+            config=config,
+            score_rows=score_rows,
+            benchmark_rows=benchmark_rows,
+            trade_calendar_rows=trade_calendar_rows,
+            prepared_execution_cache=prepare_backtest_execution_cache(
+                config=config,
+                benchmark_rows=benchmark_rows,
+                trade_calendar_rows=trade_calendar_rows,
+                nav_daily_rows=nav_daily_rows,
+                months=iter_months(start_month, end_month),
+            ),
         )
     return _run_backtest_monthly_legacy(config, score_rows, nav_rows, benchmark_rows)
+
+
+def prepare_backtest_execution_cache(
+    *,
+    config: AppConfig,
+    benchmark_rows: list[dict[str, object]],
+    trade_calendar_rows: list[dict[str, object]],
+    nav_daily_rows: list[dict[str, object]],
+    months: list[str] | None = None,
+) -> BacktestExecutionCache:
+    """构建同一实验可复用的回测执行代理缓存。"""
+    open_trade_dates = _open_trade_dates(trade_calendar_rows)
+    schedule_months = sorted(set(months or []))
+    if not schedule_months:
+        schedule_months = sorted({str(row.get("month") or "") for row in benchmark_rows if str(row.get("month") or "")})
+    return BacktestExecutionCache(
+        open_trade_dates=open_trade_dates,
+        trade_date_index={trade_date: index for index, trade_date in enumerate(open_trade_dates)},
+        daily_return_lookup=_daily_return_lookup(nav_daily_rows),
+        benchmark_daily_lookup=_benchmark_daily_return_lookup(config, benchmark_rows, trade_calendar_rows),
+        schedule_by_month=_build_execution_schedule_by_month(config, schedule_months, trade_calendar_rows),
+    )
 
 
 def _run_backtest_with_daily_execution(
@@ -34,7 +89,7 @@ def _run_backtest_with_daily_execution(
     score_rows: list[dict[str, object]],
     benchmark_rows: list[dict[str, object]],
     trade_calendar_rows: list[dict[str, object]],
-    nav_daily_rows: list[dict[str, object]],
+    prepared_execution_cache: BacktestExecutionCache,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """按 decision_date(T) 卖出、T+2 到账、T+3 新组合开始收益的研究代理口径回放。"""
     scores_by_month: dict[str, list[dict[str, object]]] = defaultdict(list)
@@ -54,9 +109,12 @@ def _run_backtest_with_daily_execution(
     if len(months) < 2:
         return [], []
 
-    open_trade_dates = _open_trade_dates(trade_calendar_rows)
-    daily_return_lookup = _daily_return_lookup(nav_daily_rows)
-    benchmark_daily_lookup = _benchmark_daily_return_lookup(config, benchmark_rows, trade_calendar_rows)
+    execution_cache = _ensure_execution_schedule_for_months(
+        config=config,
+        trade_calendar_rows=trade_calendar_rows,
+        prepared_execution_cache=prepared_execution_cache,
+        months=months,
+    )
 
     backtest_rows: list[dict[str, object]] = []
     position_audit_rows: list[dict[str, object]] = []
@@ -68,29 +126,32 @@ def _run_backtest_with_daily_execution(
         turnover = _turnover(previous_weights, current_weights)
         transaction_cost = turnover * (config.backtest.transaction_cost_bps / 10000.0)
 
-        decision_date = decision_date_for_month(current_month, trade_calendar_rows)
-        next_decision_date = decision_date_for_month(next_month, trade_calendar_rows)
-        cash_available_date = shift_trading_days(
-            decision_date,
-            config.backtest.redemption_settlement_lag_days,
-            trade_calendar_rows,
+        schedule = execution_cache.schedule_by_month[current_month]
+        decision_date = str(schedule["decision_date"])
+        next_decision_date = str(schedule["next_decision_date"])
+        cash_available_date = str(schedule["cash_available_date"])
+        buy_effective_date = str(schedule["buy_effective_date"])
+        transition_start_date = str(schedule["transition_start_date"])
+        period_trade_dates = _trade_dates_between(
+            execution_cache.open_trade_dates,
+            execution_cache.trade_date_index,
+            transition_start_date,
+            next_decision_date,
         )
-        buy_effective_date = shift_trading_days(
-            cash_available_date,
-            config.backtest.purchase_effective_lag_days,
-            trade_calendar_rows,
+        invested_trade_dates = _trade_dates_between(
+            execution_cache.open_trade_dates,
+            execution_cache.trade_date_index,
+            buy_effective_date,
+            next_decision_date,
         )
-        transition_start_date = next_trading_day(decision_date, trade_calendar_rows)
-        period_trade_dates = _trade_dates_between(open_trade_dates, transition_start_date, next_decision_date)
-        invested_trade_dates = _trade_dates_between(open_trade_dates, buy_effective_date, next_decision_date)
 
         gross_return, missing_weight, missing_position_count, period_position_rows = _portfolio_period_return(
             config=config,
             portfolio=portfolio,
             invested_trade_dates=invested_trade_dates,
-            daily_return_lookup=daily_return_lookup,
+            daily_return_lookup=execution_cache.daily_return_lookup,
         )
-        benchmark_return = _compound_benchmark_return(benchmark_daily_lookup, period_trade_dates)
+        benchmark_return = _compound_benchmark_return(execution_cache.benchmark_daily_lookup, period_trade_dates)
         net_return = gross_return - transaction_cost
         return_validity = _classify_period_return_validity(len(portfolio), invested_trade_dates, missing_weight)
 
@@ -283,9 +344,85 @@ def _open_trade_dates(trade_calendar_rows: list[dict[str, object]]) -> list[str]
     )
 
 
-def _trade_dates_between(open_trade_dates: list[str], start_date: str, end_date: str) -> list[str]:
-    """返回闭区间内的交易日。"""
-    return [trade_date for trade_date in open_trade_dates if start_date <= trade_date <= end_date]
+def _trade_dates_between(
+    open_trade_dates: list[str],
+    trade_date_index: dict[str, int],
+    start_date: str,
+    end_date: str,
+) -> list[str]:
+    """基于交易日索引返回闭区间内的交易日。"""
+    start_index = trade_date_index.get(start_date)
+    end_index = trade_date_index.get(end_date)
+    if start_index is None or end_index is None or start_index > end_index:
+        return []
+    return open_trade_dates[start_index : end_index + 1]
+
+
+def _build_execution_schedule_by_month(
+    config: AppConfig,
+    months: list[str],
+    trade_calendar_rows: list[dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    """预计算逐月执行日程，避免同一实验重复推导 T/T+2/T+3 边界。"""
+    ordered_months = sorted(set(months))
+    schedule_by_month: dict[str, dict[str, object]] = {}
+    for month in ordered_months:
+        decision_date = decision_date_for_month(month, trade_calendar_rows)
+        try:
+            cash_available_date = shift_trading_days(
+                decision_date,
+                config.backtest.redemption_settlement_lag_days,
+                trade_calendar_rows,
+            )
+        except ValueError:
+            cash_available_date = decision_date
+        try:
+            buy_effective_date = shift_trading_days(
+                cash_available_date,
+                config.backtest.purchase_effective_lag_days,
+                trade_calendar_rows,
+            )
+        except ValueError:
+            buy_effective_date = cash_available_date
+        try:
+            transition_start_date = next_trading_day(decision_date, trade_calendar_rows)
+        except ValueError:
+            # 尾月若缺少后续交易日，该日程不会被实际消费；这里仅为保持缓存结构完整。
+            transition_start_date = decision_date
+        schedule_by_month[month] = {
+            "decision_date": decision_date,
+            "cash_available_date": cash_available_date,
+            "buy_effective_date": buy_effective_date,
+            "transition_start_date": transition_start_date,
+            "next_decision_date": decision_date,
+        }
+    for current_month, next_month in zip(ordered_months, ordered_months[1:]):
+        schedule_by_month[current_month]["next_decision_date"] = schedule_by_month[next_month]["decision_date"]
+    if ordered_months:
+        last_month = ordered_months[-1]
+        schedule_by_month[last_month]["next_decision_date"] = decision_date_for_month(last_month, trade_calendar_rows)
+    return schedule_by_month
+
+
+def _ensure_execution_schedule_for_months(
+    *,
+    config: AppConfig,
+    trade_calendar_rows: list[dict[str, object]],
+    prepared_execution_cache: BacktestExecutionCache,
+    months: list[str],
+) -> BacktestExecutionCache:
+    """若缓存缺少当前回测区间的执行日程，则补齐并返回对齐后的缓存。"""
+    missing_months = [month for month in months if month not in prepared_execution_cache.schedule_by_month]
+    if not missing_months:
+        return prepared_execution_cache
+    merged_months = sorted(set(prepared_execution_cache.schedule_by_month) | set(months))
+    return BacktestExecutionCache(
+        open_trade_dates=prepared_execution_cache.open_trade_dates,
+        trade_date_index=prepared_execution_cache.trade_date_index,
+        daily_return_lookup=prepared_execution_cache.daily_return_lookup,
+        benchmark_daily_lookup=prepared_execution_cache.benchmark_daily_lookup,
+        schedule_by_month=_build_execution_schedule_by_month(config, merged_months, trade_calendar_rows),
+    )
 
 
 def _compound_returns(values: list[float]) -> float:

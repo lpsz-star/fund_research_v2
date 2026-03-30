@@ -23,8 +23,8 @@
   - 格式：`YYYY-MM-DD`
   - 含义：系统认为该条数据可被研究流程看到的日期
   - 当前用途：
-    - 用于限制某个 `signal_month` 能看到哪些净值记录
-    - 只有 `available_date <= signal_month` 月末的数据才能进入该月基金池与特征
+    - 用于限制某个 `signal_month` 在 `decision_date` 前能看到哪些记录
+    - 只有 `available_date <= 下月第1个交易日(decision_date)` 的数据才能进入该月基金池与特征
 - `ann_date`
   - 格式：`YYYYMMDD` 或空
   - 含义：上游接口中的公告日期
@@ -235,6 +235,36 @@
   - 当前主回测口径：
     - 固定使用 `benchmark.default_key`
     - 默认即 `broad_equity -> 中证800 (000906.SH)`
+
+## 5.1 `fund_nav_daily_coverage_monthly.csv`
+
+作用：
+
+- 保存基金池所需的逐实体逐月历史日频净值覆盖率
+- 用于替代运行期对 `fund_nav_pit_daily.csv` 的重复全量扫描
+
+字段说明：
+
+- `entity_id`
+  - 含义：基金实体 ID
+- `month`
+  - 含义：对应的估值月
+- `decision_date`
+  - 含义：该 `month` 的下月第 1 个交易日
+  - 当前用途：
+    - 作为“哪些日频净值已经可见”的时间边界
+- `lookback_months`
+  - 类型：整数
+  - 含义：覆盖率回看窗口长度
+- `trailing_daily_nav_coverage_ratio`
+  - 类型：浮点数
+  - 含义：回看窗口内，已可见日频净值覆盖开市日的平均比例
+  - 当前口径：
+    - 只统计 `available_date <= decision_date` 的历史 PIT 日频净值
+    - 只在“该月有开市日且至少观测到 1 个可见净值日”时纳入平均
+- `trailing_daily_nav_coverage_months`
+  - 类型：整数
+  - 含义：实际被纳入平均的月份数
 
 ## 6. `fund_universe_monthly.csv`
 
@@ -647,6 +677,10 @@
   - 规则解释文本
 
 ## 13. 实验对比产物
+
+当前这组产物统一位于：
+
+- `outputs/<data_source>/comparison/`
 
 ### 13.1 `comparison_summary.json`
 
