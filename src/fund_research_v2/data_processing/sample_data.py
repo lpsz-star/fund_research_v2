@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fund_research_v2.common.config import BenchmarkConfig, benchmark_to_serializable_dict
 from fund_research_v2.common.contracts import DatasetSnapshot
-from fund_research_v2.common.date_utils import current_timestamp
+from fund_research_v2.common.date_utils import add_months, current_timestamp, generate_weekday_trade_calendar, month_end
 from fund_research_v2.data_processing.fund_liquidity_classifier import classify_fund_liquidity
 from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
 
@@ -23,10 +23,15 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
     fund_entity_master = []
     share_class_map = []
     nav_rows = []
+    nav_pit_daily_rows = []
     benchmark_rows = []
     manager_rows = []
     fund_type_audit_rows = []
     fund_liquidity_audit_rows = []
+    trade_calendar_rows = generate_weekday_trade_calendar(
+        f"{months[0]}-01",
+        month_end(add_months(months[-1], 1)),
+    )
     for entity_id, entity_name, primary_type, company, manager, inception_month, manager_start_month, assets, drift in entities:
         classification = classify_fund_type(
             fund_type=primary_type,
@@ -96,6 +101,7 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
             ]
         )
         nav = 1.0
+        nav_by_trade_date: dict[str, float] = {}
         for index, month in enumerate(months):
             # 这里人为叠加季节性、动量、回撤和新基金扰动，用于测试基金池和评分是否按预期区分样本。
             seasonal = ((index % 6) - 2) * 0.002
@@ -115,6 +121,35 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
                     "assets_cny_mn": round(assets + index * 4.0, 3),
                 }
             )
+            month_trade_dates = [
+                str(row["cal_date"])
+                for row in trade_calendar_rows
+                if str(row["cal_date"]).startswith(month) and int(row["is_open"]) == 1
+            ]
+            if month_trade_dates:
+                trading_days = len(month_trade_dates)
+                daily_return = round((1 + monthly_return) ** (1 / trading_days) - 1.0, 10)
+                previous_nav = nav_by_trade_date[month_trade_dates[-1]] if month_trade_dates[-1] in nav_by_trade_date else (
+                    nav_rows[-2]["nav"] if len(nav_rows) > 1 and nav_rows[-2]["entity_id"] == entity_id else 1.0
+                )
+                running_nav = float(previous_nav)
+                for trade_date in month_trade_dates:
+                    running_nav = round(running_nav * (1 + daily_return), 6)
+                    nav_by_trade_date[trade_date] = running_nav
+                    nav_pit_daily_rows.append(
+                        {
+                            "entity_id": entity_id,
+                            "ts_code": f"{entity_id}A",
+                            "trade_date": trade_date,
+                            "nav_date": trade_date,
+                            "available_date": trade_date,
+                            "nav": running_nav,
+                            "daily_return": round(daily_return, 10),
+                            "assets_cny_mn": round(assets + index * 4.0, 3),
+                            "selected_update_flag": "0",
+                            "selection_reason": "sample_daily_expansion",
+                        }
+                    )
             active_manager_start = manager_start_month if manager_start_month and manager_start_month <= month else inception_month
             manager_rows.append(
                 {
@@ -154,6 +189,8 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
         manager_assignment_monthly=manager_rows,
         fund_type_audit=fund_type_audit_rows,
         fund_liquidity_audit=fund_liquidity_audit_rows,
+        trade_calendar=trade_calendar_rows,
+        fund_nav_pit_daily=nav_pit_daily_rows,
         metadata={
             "source_name": "sample",
             "generated_at": current_timestamp(),
@@ -195,6 +232,13 @@ def generate_sample_dataset(lookback_months: int, benchmark_config: BenchmarkCon
                     rule_code: sum(1 for row in fund_liquidity_audit_rows if int(row["liquidity_restricted"]) == 1 and row["rule_code"] == rule_code)
                     for rule_code in sorted({str(row["rule_code"]) for row in fund_liquidity_audit_rows if int(row["liquidity_restricted"]) == 1})
                 },
+            },
+            "trade_calendar": {
+                "source": "sample_weekday_calendar",
+                "exchange": "SSE",
+                "start_date": trade_calendar_rows[0]["cal_date"],
+                "end_date": trade_calendar_rows[-1]["cal_date"],
+                "open_day_count": sum(int(row["is_open"]) for row in trade_calendar_rows),
             },
         },
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
+from datetime import date, datetime, timedelta
 from datetime import datetime
 
 
@@ -70,6 +71,105 @@ def is_available_by_month_end(available_date: str, signal_month: str) -> bool:
     return available_date <= month_end(signal_month)
 
 
+def decision_date_for_month(month: str, trade_calendar_rows: list[dict[str, object]]) -> str:
+    """返回某个估值月对应的决策日，定义为下月第 1 个交易日。"""
+    next_month = add_months(month, 1)
+    if trade_calendar_rows:
+        return first_trading_day_of_month(next_month, trade_calendar_rows)
+    # 兼容旧测试和缺失交易日历的场景：至少把决策日明确推到下个月，而不是继续落在信号月月末。
+    return month_start(next_month)
+
+
+def is_available_by_decision_date(available_date: str, month: str, trade_calendar_rows: list[dict[str, object]]) -> bool:
+    """判断一条记录是否在该估值月的决策日之前已经可见。"""
+    return available_date <= decision_date_for_month(month, trade_calendar_rows)
+
+
 def current_timestamp() -> str:
     """生成 UTC 时间戳，用于数据快照和实验记录。"""
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def first_trading_day_of_month(month: str, trade_calendar_rows: list[dict[str, object]]) -> str:
+    """返回某个月的第一个交易日；缺失时抛出异常而不是静默回退。"""
+    candidates = [
+        str(row.get("cal_date", ""))
+        for row in trade_calendar_rows
+        if str(row.get("is_open", "0")) == "1" and str(row.get("cal_date", "")).startswith(month)
+    ]
+    if not candidates:
+        raise ValueError(f"交易日历中缺少 {month} 的首个交易日。")
+    return min(candidates)
+
+
+def last_trading_day_of_month(month: str, trade_calendar_rows: list[dict[str, object]]) -> str:
+    """返回某个月的最后一个交易日。"""
+    candidates = [
+        str(row.get("cal_date", ""))
+        for row in trade_calendar_rows
+        if str(row.get("is_open", "0")) == "1" and str(row.get("cal_date", "")).startswith(month)
+    ]
+    if not candidates:
+        raise ValueError(f"交易日历中缺少 {month} 的最后一个交易日。")
+    return max(candidates)
+
+
+def next_trading_day(current_date: str, trade_calendar_rows: list[dict[str, object]]) -> str:
+    """返回给定日期之后的下一个交易日。"""
+    candidates = sorted(
+        str(row.get("cal_date", ""))
+        for row in trade_calendar_rows
+        if str(row.get("is_open", "0")) == "1" and str(row.get("cal_date", "")) > current_date
+    )
+    if not candidates:
+        raise ValueError(f"交易日历中缺少 {current_date} 之后的交易日。")
+    return candidates[0]
+
+
+def shift_trading_days(current_date: str, offset: int, trade_calendar_rows: list[dict[str, object]]) -> str:
+    """从给定日期向后偏移若干个交易日。offset=0 返回原日期（若它是交易日）。"""
+    if offset < 0:
+        raise ValueError("当前仅支持向后偏移交易日。")
+    open_dates = sorted(
+        str(row.get("cal_date", ""))
+        for row in trade_calendar_rows
+        if str(row.get("is_open", "0")) == "1"
+    )
+    if not open_dates:
+        raise ValueError("交易日历为空，无法偏移交易日。")
+    if offset == 0:
+        if current_date in open_dates:
+            return current_date
+        return next_trading_day(current_date, trade_calendar_rows)
+    shifted = current_date
+    for _ in range(offset):
+        shifted = next_trading_day(shifted, trade_calendar_rows)
+    return shifted
+
+
+def generate_weekday_trade_calendar(start_date: str, end_date: str, exchange: str = "SSE") -> list[dict[str, object]]:
+    """生成仅用于 sample / 测试的工作日交易日历。"""
+    start = _parse_iso_date(start_date)
+    end = _parse_iso_date(end_date)
+    rows: list[dict[str, object]] = []
+    previous_open_date = ""
+    current = start
+    while current <= end:
+        open_flag = 1 if current.weekday() < 5 else 0
+        rows.append(
+            {
+                "exchange": exchange,
+                "cal_date": current.isoformat(),
+                "is_open": open_flag,
+                "pretrade_date": previous_open_date,
+            }
+        )
+        if open_flag == 1:
+            previous_open_date = current.isoformat()
+        current += timedelta(days=1)
+    return rows
+
+
+def _parse_iso_date(value: str) -> date:
+    """把 YYYY-MM-DD 字符串解析成 date。"""
+    return datetime.strptime(value, "%Y-%m-%d").date()

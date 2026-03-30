@@ -4,7 +4,7 @@ from collections import defaultdict
 
 from fund_research_v2.common.config import AppConfig
 from fund_research_v2.common.contracts import DatasetSnapshot, UniverseSnapshot
-from fund_research_v2.common.date_utils import is_available_by_month_end, month_diff
+from fund_research_v2.common.date_utils import decision_date_for_month, is_available_by_decision_date, month_diff
 
 
 def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnapshot:
@@ -13,13 +13,18 @@ def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnaps
     for row in dataset.fund_nav_monthly:
         nav_by_entity[str(row["entity_id"])].append(row)
     rows: list[dict[str, object]] = []
+    trade_calendar_rows = dataset.trade_calendar
     for entity in dataset.fund_entity_master:
         entity_id = str(entity["entity_id"])
         entity_nav = sorted(nav_by_entity.get(entity_id, []), key=lambda item: str(item["month"]))
         for nav_row in entity_nav:
             month = str(nav_row["month"])
+            decision_date = decision_date_for_month(month, trade_calendar_rows)
             reasons = []
-            visible_nav_rows = [row for row in entity_nav if str(row["month"]) <= month and is_available_by_month_end(str(row["available_date"]), month)]
+            visible_nav_rows = [
+                row for row in entity_nav
+                if str(row["month"]) <= month and is_available_by_decision_date(str(row["available_date"]), month, trade_calendar_rows)
+            ]
             current_visible_row = next((row for row in visible_nav_rows if str(row["month"]) == month), None)
             visible_history_months = len(visible_nav_rows)
             fund_age_months = month_diff(month, str(entity["inception_month"]))
@@ -33,7 +38,7 @@ def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnaps
                 # 当前策略优先保证月频调仓流动性，因此最低持有期基金直接在基金池层剔除，而不是在回测里复杂模拟锁定期。
                 reasons.append("holding_period_restricted")
             if current_visible_row is None:
-                reasons.append("no_available_nav_for_month")
+                reasons.append("nav_not_available_by_decision_date")
             if visible_history_months < config.universe.min_history_months:
                 reasons.append("insufficient_history")
             if current_visible_row is None or visible_assets_cny_mn < config.universe.min_assets_cny_mn:
@@ -51,6 +56,7 @@ def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnaps
                     "fund_age_months": fund_age_months,
                     "visible_assets_cny_mn": round(visible_assets_cny_mn, 3),
                     "nav_available_date": "" if current_visible_row is None else str(current_visible_row["available_date"]),
+                    "decision_date": decision_date,
                 }
             )
     return UniverseSnapshot(

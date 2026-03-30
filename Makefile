@@ -26,6 +26,8 @@ help:
 	"  make backtest-tushare     运行 tushare 回测流程" \
 	"  make run-sample           运行 sample 完整实验" \
 	"  make run-tushare          运行 tushare 完整实验" \
+	"  make serve-web-sample     启动 sample 本地只读网站" \
+	"  make serve-web-tushare    启动 tushare 本地只读网站" \
 	"  make clean-outputs        清理 outputs 目录" \
 	"  make clean-raw            清理 data/raw 目录"
 
@@ -104,6 +106,14 @@ run-sample:
 .PHONY: run-tushare
 run-tushare:
 	$(PYTHON) $(APP) run-experiment --config $(TUSHARE_CONFIG)
+
+.PHONY: serve-web-sample
+serve-web-sample:
+	$(PYTHON) $(APP) serve-web --config $(SAMPLE_CONFIG)
+
+.PHONY: serve-web-tushare
+serve-web-tushare:
+	$(PYTHON) $(APP) serve-web --config $(TUSHARE_CONFIG)
 
 .PHONY: clean-outputs
 clean-outputs:

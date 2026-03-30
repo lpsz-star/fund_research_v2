@@ -20,5 +20,6 @@ class PipelineIntegrationTest(PipelineTestBase):
     # 组合构建与回测执行规则虽然局部可解释，但这里验证的是主流程中的集成语义。
     test_portfolio_limits_single_company_exposure = LegacyPipelineTest.test_portfolio_limits_single_company_exposure
     test_backtest_respects_next_month_execution = LegacyPipelineTest.test_backtest_respects_next_month_execution
+    test_backtest_daily_execution_uses_t_plus_2_cash_and_t_plus_3_new_holdings = LegacyPipelineTest.test_backtest_daily_execution_uses_t_plus_2_cash_and_t_plus_3_new_holdings
     test_cli_fetch_uses_fetch_command = LegacyPipelineTest.test_cli_fetch_uses_fetch_command
     test_cli_run_portfolio_uses_portfolio_command = LegacyPipelineTest.test_cli_run_portfolio_uses_portfolio_command

@@ -26,12 +26,16 @@ def build_robustness_analysis(
         score_rows=candidate_score_rows,
         nav_rows=dataset.fund_nav_monthly,
         benchmark_rows=dataset.benchmark_monthly,
+        trade_calendar_rows=dataset.trade_calendar,
+        nav_daily_rows=dataset.fund_nav_pit_daily,
     )
     baseline_backtest_rows, _ = run_backtest(
         config=baseline_config,
         score_rows=baseline_score_rows,
         nav_rows=dataset.fund_nav_monthly,
         benchmark_rows=dataset.benchmark_monthly,
+        trade_calendar_rows=dataset.trade_calendar,
+        nav_daily_rows=dataset.fund_nav_pit_daily,
     )
     candidate_monthly_portfolios = _build_monthly_portfolios(candidate_config, candidate_score_rows)
     baseline_monthly_portfolios = _build_monthly_portfolios(baseline_config, baseline_score_rows)

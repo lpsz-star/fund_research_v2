@@ -183,6 +183,8 @@ def run_backtest_command(config_path: Path) -> None:
         score_rows=bundle["score_rows"],
         nav_rows=bundle["dataset"].fund_nav_monthly,
         benchmark_rows=bundle["dataset"].benchmark_monthly,
+        trade_calendar_rows=bundle["dataset"].trade_calendar,
+        nav_daily_rows=bundle["dataset"].fund_nav_pit_daily,
     )
     backtest_summary = summarize_backtest(backtest_rows)
     write_full_outputs(bundle, backtest_rows, position_audit_rows, backtest_summary, [])
@@ -200,6 +202,8 @@ def run_experiment_command(config_path: Path) -> None:
         score_rows=bundle["score_rows"],
         nav_rows=bundle["dataset"].fund_nav_monthly,
         benchmark_rows=bundle["dataset"].benchmark_monthly,
+        trade_calendar_rows=bundle["dataset"].trade_calendar,
+        nav_daily_rows=bundle["dataset"].fund_nav_pit_daily,
     )
     backtest_summary = summarize_backtest(backtest_rows)
     write_full_outputs(bundle, backtest_rows, position_audit_rows, backtest_summary, portfolio_rows)

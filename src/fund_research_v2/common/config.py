@@ -44,6 +44,9 @@ class BacktestConfig:
     transaction_cost_bps: float
     missing_return_policy: str
     missing_weight_warning_threshold: float
+    redemption_settlement_lag_days: int
+    purchase_effective_lag_days: int
+    cash_return_model: str
 
 
 @dataclass(frozen=True)
@@ -177,6 +180,9 @@ def load_config(path: Path) -> AppConfig:
             transaction_cost_bps=float(raw["backtest"].get("transaction_cost_bps", 10.0)),
             missing_return_policy=raw["backtest"].get("missing_return_policy", "zero_fill_legacy"),
             missing_weight_warning_threshold=float(raw["backtest"].get("missing_weight_warning_threshold", 0.05)),
+            redemption_settlement_lag_days=int(raw["backtest"].get("redemption_settlement_lag_days", 2)),
+            purchase_effective_lag_days=int(raw["backtest"].get("purchase_effective_lag_days", 1)),
+            cash_return_model=raw["backtest"].get("cash_return_model", "zero"),
         ),
         benchmark=benchmark,
         reporting=ReportingConfig(top_ranked_limit=int(raw["reporting"].get("top_ranked_limit", 10))),
@@ -256,6 +262,12 @@ def _validate(config: AppConfig) -> None:
         raise ValueError("backtest.missing_return_policy 必须是 zero_fill_legacy 或 audit_only。")
     if not 0 <= config.backtest.missing_weight_warning_threshold <= 1:
         raise ValueError("backtest.missing_weight_warning_threshold 必须位于 [0, 1]。")
+    if config.backtest.redemption_settlement_lag_days < 0:
+        raise ValueError("backtest.redemption_settlement_lag_days 不能小于 0。")
+    if config.backtest.purchase_effective_lag_days < 0:
+        raise ValueError("backtest.purchase_effective_lag_days 不能小于 0。")
+    if config.backtest.cash_return_model not in {"zero"}:
+        raise ValueError("当前仅支持 cash_return_model=zero。")
 
 
 def _validate_month(field_name: str, value: str) -> None:

@@ -17,6 +17,7 @@ from fund_research_v2.common.workflows import (
     run_universe_command,
     validate_baseline_candidate_command,
 )
+from fund_research_v2.web.viewer import serve_web_command
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,9 +37,13 @@ def build_parser() -> argparse.ArgumentParser:
         "run-portfolio",
         "run-backtest",
         "run-experiment",
+        "serve-web",
     ]:
         command_parser = subparsers.add_parser(command_name)
         command_parser.add_argument("--config", default="configs/default.json")
+        if command_name == "serve-web":
+            command_parser.add_argument("--host", default="127.0.0.1")
+            command_parser.add_argument("--port", type=int, default=8000)
     return parser
 
 
@@ -61,5 +66,8 @@ def main() -> int:
         "run-backtest": run_backtest_command,
         "run-experiment": run_experiment_command,
     }
+    if args.command == "serve-web":
+        serve_web_command(config_path, host=args.host, port=args.port)
+        return 0
     command_map[args.command](config_path)
     return 0

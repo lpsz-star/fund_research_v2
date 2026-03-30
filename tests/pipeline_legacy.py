@@ -13,7 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from fund_research_v2.backtest.engine import run_backtest
 from fund_research_v2.cli import main
 from fund_research_v2.common.config import load_config
-from fund_research_v2.common.date_utils import add_months, is_available_by_month_end, iter_months, latest_completed_month, month_end, month_start
+from fund_research_v2.common.date_utils import add_months, decision_date_for_month, is_available_by_decision_date, is_available_by_month_end, iter_months, latest_completed_month, month_end, month_start
 from fund_research_v2.common.io_utils import read_csv
 from fund_research_v2.common.workflows import analyze_robustness_command, compare_experiments_command, fetch_failed_command, prepare_bundle, run_experiment_command, run_portfolio_command, run_universe_command
 from fund_research_v2.data_ingestion.providers import DatasetSnapshot, load_cached_dataset
@@ -647,6 +647,13 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(iter_months("2026-01", "2026-03"), ["2026-01", "2026-02", "2026-03"])
         self.assertTrue(is_available_by_month_end("2026-02-28", "2026-02"))
         self.assertFalse(is_available_by_month_end("2026-03-01", "2026-02"))
+        trade_calendar = [
+            {"exchange": "SSE", "cal_date": "2026-03-02", "is_open": 1, "pretrade_date": "2026-02-27"},
+            {"exchange": "SSE", "cal_date": "2026-03-03", "is_open": 1, "pretrade_date": "2026-03-02"},
+        ]
+        self.assertEqual(decision_date_for_month("2026-02", trade_calendar), "2026-03-02")
+        self.assertTrue(is_available_by_decision_date("2026-03-02", "2026-02", trade_calendar))
+        self.assertFalse(is_available_by_decision_date("2026-03-03", "2026-02", trade_calendar))
 
     def test_universe_marks_nav_not_available_by_signal_month_end(self) -> None:
         """验证当月净值虽属于该月但月末前不可见时，会被基金池正确剔除。"""
@@ -679,7 +686,7 @@ class PipelineTest(unittest.TestCase):
         universe = build_universe(config, dataset)
         reason_map = {str(row["month"]): str(row["reason_codes"]) for row in universe.rows if str(row["entity_id"]) == "LATE"}
 
-        self.assertIn("no_available_nav_for_month", reason_map["2026-02"])
+        self.assertIn("nav_not_available_by_decision_date", reason_map["2026-02"])
         self.assertIn("insufficient_history", reason_map["2026-02"])
 
     def test_feature_builder_does_not_use_future_available_returns(self) -> None:
@@ -1085,6 +1092,71 @@ class PipelineTest(unittest.TestCase):
         self.assertLess(rows[0]["signal_month"], rows[0]["execution_month"])
         self.assertEqual(rows[0]["execution_request_date_proxy"], f"{rows[0]['execution_month']}-01")
         self.assertEqual(rows[0]["execution_effective_date_proxy"], rows[0]["execution_request_date_proxy"])
+
+    def test_backtest_daily_execution_uses_t_plus_2_cash_and_t_plus_3_new_holdings(self) -> None:
+        """验证新回测口径下，T 日卖出含当日收益，T+1~T+2 空仓，T+3 新组合开始记收益。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["backtest"]["start_month"] = "2026-01"
+        config_payload["backtest"]["end_month"] = "2026-02"
+        config_payload["backtest"]["transaction_cost_bps"] = 0.0
+        config_payload["portfolio"]["portfolio_size"] = 1
+        config_payload["portfolio"]["single_fund_cap"] = 1.0
+        config = load_config(self._write_config(root, config_payload))
+        score_rows = [
+            {
+                "entity_id": "ONLY",
+                "month": "2026-01",
+                "entity_name": "唯一基金",
+                "fund_company": "测试基金",
+                "primary_type": "主动股票",
+                "rank": 1,
+                "total_score": 1.0,
+            }
+        ]
+        nav_daily_rows = [
+            {"entity_id": "ONLY", "trade_date": "2026-02-05", "daily_return": 0.01},
+            {"entity_id": "ONLY", "trade_date": "2026-02-08", "daily_return": 0.02},
+            {"entity_id": "ONLY", "trade_date": "2026-03-02", "daily_return": -0.01},
+        ]
+        benchmark_rows = [
+            {"month": "2026-01", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.0},
+            {"month": "2026-02", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.0},
+            {"month": "2026-03", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.0},
+        ]
+        trade_calendar_rows = [
+            {"exchange": "SSE", "cal_date": "2026-02-02", "is_open": 1, "pretrade_date": "2026-01-30"},
+            {"exchange": "SSE", "cal_date": "2026-02-03", "is_open": 1, "pretrade_date": "2026-02-02"},
+            {"exchange": "SSE", "cal_date": "2026-02-04", "is_open": 1, "pretrade_date": "2026-02-03"},
+            {"exchange": "SSE", "cal_date": "2026-02-05", "is_open": 1, "pretrade_date": "2026-02-04"},
+            {"exchange": "SSE", "cal_date": "2026-02-08", "is_open": 1, "pretrade_date": "2026-02-05"},
+            {"exchange": "SSE", "cal_date": "2026-03-02", "is_open": 1, "pretrade_date": "2026-02-08"},
+        ]
+
+        rows, position_audit_rows = run_backtest(
+            config,
+            score_rows,
+            nav_rows=[],
+            benchmark_rows=benchmark_rows,
+            trade_calendar_rows=trade_calendar_rows,
+            nav_daily_rows=nav_daily_rows,
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["decision_date"], "2026-02-02")
+        self.assertEqual(rows[0]["cash_available_date"], "2026-02-04")
+        self.assertEqual(rows[0]["buy_effective_date"], "2026-02-05")
+        self.assertEqual(rows[0]["holding_start_date"], "2026-02-03")
+        self.assertEqual(rows[0]["holding_end_date"], "2026-03-02")
+        self.assertEqual(int(rows[0]["cash_transition_trade_days"]), 2)
+        self.assertEqual(int(rows[0]["invested_trade_days"]), 3)
+        self.assertAlmostEqual(float(rows[0]["portfolio_return_gross"]), 0.019898, places=6)
+        self.assertAlmostEqual(float(rows[0]["portfolio_return_net"]), 0.019898, places=6)
+        self.assertEqual(str(rows[0]["return_validity"]), "valid")
+        self.assertEqual(len(position_audit_rows), 1)
+        self.assertEqual(int(position_audit_rows[0]["missing_trade_date_count"]), 0)
+        self.assertEqual(str(position_audit_rows[0]["outcome_status"]), "observed_return")
 
     def test_backtest_uses_continuous_months_and_records_empty_portfolio_months(self) -> None:
         """验证回测按完整月历推进，即使中间月份没有评分结果也会显式写出空仓期。"""
@@ -1569,15 +1641,21 @@ class PipelineTest(unittest.TestCase):
         """验证实体规模按同一基金下各份额求和，而收益仍由代表份额承载。"""
         provider = object.__new__(TushareDataProvider)
 
-        def fake_fetch_monthly_nav_rows(ts_code: str, entity_id: str) -> tuple[float, list[dict[str, object]]]:
+        def fake_fetch_monthly_nav_rows(ts_code: str, entity_id: str) -> tuple[float, list[dict[str, object]], list[dict[str, object]]]:
             """构造 A/C 两类份额的月度净值与规模，用于隔离测试实体汇总逻辑。"""
             if ts_code == "A.OF":
                 return 110.0, [
+                    {"entity_id": entity_id, "trade_date": "2026-02-28", "daily_return": 0.0, "assets_cny_mn": 100.0},
+                    {"entity_id": entity_id, "trade_date": "2026-03-31", "daily_return": 0.02, "assets_cny_mn": 110.0},
+                ], [
                     {"entity_id": entity_id, "month": "2026-02", "nav_date": "2026-02-28", "available_date": "2026-03-01", "nav": 1.0, "return_1m": 0.02, "assets_cny_mn": 100.0},
                     {"entity_id": entity_id, "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-04-01", "nav": 1.02, "return_1m": 0.02, "assets_cny_mn": 110.0},
                 ]
             if ts_code == "C.OF":
                 return 55.0, [
+                    {"entity_id": entity_id, "trade_date": "2026-02-28", "daily_return": 0.0, "assets_cny_mn": 50.0},
+                    {"entity_id": entity_id, "trade_date": "2026-03-31", "daily_return": 0.02, "assets_cny_mn": 55.0},
+                ], [
                     {"entity_id": entity_id, "month": "2026-02", "nav_date": "2026-02-28", "available_date": "2026-03-01", "nav": 0.99, "return_1m": 0.019, "assets_cny_mn": 50.0},
                     {"entity_id": entity_id, "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-04-01", "nav": 1.01, "return_1m": 0.02, "assets_cny_mn": 55.0},
                 ]
@@ -1589,10 +1667,11 @@ class PipelineTest(unittest.TestCase):
             {"ts_code": "C.OF", "name": "测试基金C", "status": "L", "found_date": "20200101"},
         ]
 
-        latest_assets, entity_nav_rows = provider._fetch_entity_monthly_nav_rows(share_class_rows, "TEST::测试基金")
+        latest_assets, entity_daily_rows, entity_nav_rows = provider._fetch_entity_monthly_nav_rows(share_class_rows, "TEST::测试基金")
 
         # 最新规模和历史规模都应按份额求和，但 return_1m 仍应来自代表份额 A 的收益路径。
         self.assertEqual(latest_assets, 165.0)
+        self.assertEqual(entity_daily_rows[-1]["assets_cny_mn"], 165.0)
         self.assertEqual(entity_nav_rows[-1]["assets_cny_mn"], 165.0)
         self.assertEqual(entity_nav_rows[0]["assets_cny_mn"], 150.0)
         self.assertEqual(entity_nav_rows[-1]["return_1m"], 0.02)
@@ -1703,8 +1782,21 @@ class PipelineTest(unittest.TestCase):
         provider._build_manager_assignment_rows = lambda ts_code, entity_id, entity_nav_rows: []  # type: ignore[method-assign]
         provider._fetch_benchmark_rows = lambda month_set: [{"month": month, "benchmark_return_1m": 0.01} for month in month_set]  # type: ignore[method-assign]
 
-        def fake_fetch_entity_monthly_nav_rows(rows: list[dict[str, object]], entity_id: str) -> tuple[float, list[dict[str, object]]]:
+        def fake_fetch_entity_monthly_nav_rows(
+            rows: list[dict[str, object]],
+            entity_id: str,
+        ) -> tuple[float, list[dict[str, object]], list[dict[str, object]]]:
             return 123.0, [
+                {
+                    "entity_id": entity_id,
+                    "trade_date": "2026-02-28",
+                    "nav_date": "2026-02-28",
+                    "available_date": "2026-02-28",
+                    "nav": 1.0,
+                    "daily_return": 0.0,
+                    "assets_cny_mn": 123.0,
+                }
+            ], [
                 {
                     "entity_id": entity_id,
                     "month": "2026-02",

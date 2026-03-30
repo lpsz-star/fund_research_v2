@@ -5,3 +5,4 @@ __pycache__/
 data/raw/
 outputs/
 docs/roadmap.md
+.vscode/settings.json

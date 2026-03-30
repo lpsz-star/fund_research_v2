@@ -35,6 +35,8 @@
 - 黑盒机器学习模型
 - 依赖人工修补原始数据的流程
 
+当前额外提供一个本地只读研究网站，用于浏览 `outputs/<data_source>/...` 下已经生成的实验、回测、组合和 Markdown 报告。它不修改研究产物，也不在页面里触发策略运行。
+
 ## 2. 当前默认研究范围
 
 首期默认研究对象为：
@@ -325,7 +327,47 @@ make run-tushare
 - `outputs/tushare/reports/fetch_retry_report.md`
 - `outputs/tushare/result/fetch_retry_summary.json`
 
-### 6.5 常用验证命令
+### 6.5 在浏览器里查看结果
+
+先确保已经生成可读产物，例如：
+
+```bash
+make run-sample
+```
+
+然后启动本地只读网站：
+
+```bash
+make serve-web-sample
+```
+
+默认浏览地址：
+
+- `http://127.0.0.1:8000/`
+
+如果要查看真实数据产物：
+
+```bash
+make run-tushare
+make serve-web-tushare
+```
+
+也可以直接调用 CLI：
+
+```bash
+PYTHONPATH=src python3 -m fund_research_v2 serve-web --config configs/default.json --host 127.0.0.1 --port 8000
+```
+
+当前网站提供 4 个只读视图：
+
+- `/`：实验总览
+- `/backtest`：回测指标、累计曲线、月度结果
+- `/portfolio`：最新正式研究月组合与候选排名
+- `/reports`：Markdown 报告浏览
+
+重跑实验后，手动刷新页面即可读取最新结果。
+
+### 6.6 常用验证命令
 
 ```bash
 make help
@@ -335,6 +377,8 @@ make compare-sample
 make compare-tushare
 make run-sample
 make run-tushare
+make serve-web-sample
+make serve-web-tushare
 make portfolio-tushare
 make backtest-tushare
 ```

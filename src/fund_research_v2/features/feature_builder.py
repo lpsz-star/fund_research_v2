@@ -5,7 +5,7 @@ from math import sqrt
 
 from fund_research_v2.common.config import AppConfig
 from fund_research_v2.common.contracts import DatasetSnapshot, UniverseSnapshot
-from fund_research_v2.common.date_utils import is_available_by_month_end, month_diff
+from fund_research_v2.common.date_utils import decision_date_for_month, is_available_by_decision_date, month_diff
 
 
 def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: UniverseSnapshot) -> list[dict[str, object]]:
@@ -18,6 +18,7 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
     eligibility = {(str(row["entity_id"]), str(row["month"])): int(row["is_eligible"]) for row in universe.rows}
     nav_by_entity: dict[str, list[dict[str, object]]] = defaultdict(list)
     benchmark_rows = sorted(dataset.benchmark_monthly, key=lambda item: str(item["month"]))
+    trade_calendar_rows = dataset.trade_calendar
     for row in dataset.fund_nav_monthly:
         nav_by_entity[str(row["entity_id"])].append(row)
     feature_rows = []
@@ -26,12 +27,16 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
         entity = entity_lookup[entity_id]
         raw_months = [str(row["month"]) for row in nav_rows]
         for month in raw_months:
-            visible_rows = [row for row in nav_rows if str(row["month"]) <= month and is_available_by_month_end(str(row["available_date"]), month)]
+            decision_date = decision_date_for_month(month, trade_calendar_rows)
+            visible_rows = [
+                row for row in nav_rows
+                if str(row["month"]) <= month and is_available_by_decision_date(str(row["available_date"]), month, trade_calendar_rows)
+            ]
             if not visible_rows:
                 continue
             current_visible_row = next((row for row in visible_rows if str(row["month"]) == month), None)
             if current_visible_row is None:
-                # 若当月净值在月末前尚不可见，则该月不能形成合法信号，也不应生成特征行。
+                # 若当月净值在决策日前尚不可见，则该月不能形成合法信号，也不应生成特征行。
                 continue
             # 所有滚动窗口都基于“截至当月末已可见”的历史序列，而不是事后补全后的完整历史。
             returns = [float(row["return_1m"]) for row in visible_rows]
@@ -40,7 +45,12 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
             months = [str(row["month"]) for row in visible_rows]
             index = len(months) - 1
             benchmark_key = config.benchmark.key_for_primary_type(str(entity["primary_type"]))
-            benchmark_lookup_map = _visible_benchmark_lookup_map(benchmark_rows, month, config.benchmark.default_key)
+            benchmark_lookup_map = _visible_benchmark_lookup_map(
+                benchmark_rows,
+                month,
+                config.benchmark.default_key,
+                trade_calendar_rows,
+            )
             benchmark_lookup = _benchmark_lookup_for_key(benchmark_lookup_map, benchmark_key, config.benchmark.default_key)
             benchmark_series = config.benchmark.series_for_key(benchmark_key)
             excess_ret_3m = round(_window_total_return(returns, index, 3) - _window_total_return_from_scalar(benchmark_lookup, months, index, 3), 6)
@@ -71,6 +81,7 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
                     "primary_type": entity["primary_type"],
                     "benchmark_key": benchmark_key,
                     "benchmark_name": benchmark_series.name,
+                    "decision_date": decision_date,
                     "manager_name": _manager_name_for_month(entity, manager_row),
                     "ret_3m": _window_total_return(returns, index, 3),
                     "ret_6m": _window_total_return(returns, index, 6),
@@ -196,13 +207,14 @@ def _visible_benchmark_lookup_map(
     benchmark_rows: list[dict[str, object]],
     signal_month: str,
     default_benchmark_key: str,
+    trade_calendar_rows: list[dict[str, object]],
 ) -> dict[str, dict[str, float]]:
     """构建截至某个信号月末实际可见的 benchmark 月收益映射。"""
     visible_lookup: dict[str, dict[str, float]] = defaultdict(dict)
     for row in benchmark_rows:
         month = str(row["month"])
         available_date = _benchmark_available_date(row)
-        if month <= signal_month and is_available_by_month_end(available_date, signal_month):
+        if month <= signal_month and is_available_by_decision_date(available_date, signal_month, trade_calendar_rows):
             benchmark_key = str(row.get("benchmark_key") or default_benchmark_key)
             visible_lookup[benchmark_key][month] = float(row["benchmark_return_1m"])
     return visible_lookup
