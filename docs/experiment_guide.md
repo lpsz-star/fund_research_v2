@@ -86,7 +86,7 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 
 - [robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
 - [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
-- [v2_baseline_review_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)
+- [v2_baseline_review_2026-03-25.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-25.md)
 - [candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
 
 ## 3. 一次完整实验会产出什么
@@ -102,22 +102,23 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 ### 3.1 清洗层
 
 - [`fund_entity_master.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_entity_master.csv)
-- [`fund_share_class_map.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_share_class_map.csv)
-- [`fund_nav_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_nav_monthly.csv)
-- [`benchmark_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/benchmark_monthly.csv)
-- [`manager_assignment_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/manager_assignment_monthly.csv)
-- [`fund_universe_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_universe_monthly.csv)
+- [`fund_share_class_map.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_share_class_map.csv)
+- [`fund_nav_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_nav_monthly.csv)
+- [`benchmark_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/benchmark_monthly.csv)
+- [`manager_assignment_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/manager_assignment_monthly.csv)
+- [`fund_universe_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_universe_monthly.csv)
+- [`fund_nav_daily_coverage_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_nav_daily_coverage_monthly.csv)
 - [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/dataset_snapshot.json)
 
 ### 3.2 特征与结果层
 
 - [`fund_feature_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/feature/fund_feature_monthly.csv)
 - [`fund_score_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/fund_score_monthly.csv)
-- [`portfolio_target_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_target_monthly.csv)
-- [`portfolio_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_snapshot.json)
-- [`backtest_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_monthly.csv)
-- [`backtest_position_audit.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_position_audit.csv)
-- [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_summary.json)
+- [`portfolio_target_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/portfolio_target_monthly.csv)
+- [`portfolio_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/portfolio_snapshot.json)
+- [`backtest_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/backtest_monthly.csv)
+- [`backtest_position_audit.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/backtest_position_audit.csv)
+- [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/backtest_summary.json)
 - [`factor_evaluation.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_evaluation.json)
 - [`factor_evaluation.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_evaluation.csv)
 - [`type_baseline_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_snapshot.json)
@@ -125,9 +126,9 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 ### 3.3 报告层
 
 - [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/portfolio_report.md)
-- [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
-- [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/backtest_report.md)
-- [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
+- [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/experiment_report.md)
+- [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/backtest_report.md)
+- [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
 - [`factor_evaluation_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_evaluation_report.md)
 
 ### 3.4 实验追踪层
@@ -412,12 +413,4 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 
 这会降低代码版本可追踪性。
 
-## 10. 后续建议
 
-建议后续补强：
-
-1. baseline 命名与版本冻结机制
-2. 实验对比脚本
-3. 配置差异自动摘要
-4. 数据快照版本号
-5. 实验失败日志与自动归档

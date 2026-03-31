@@ -4,6 +4,18 @@
 
 ## 2026-03-30
 
+### 10. 同步修正文档入口中的旧口径与旧路径
+
+- 变更内容：
+  - `README.md` 的默认回测节奏改为当前真实口径：下月第 1 个交易日决策，`T` 卖出、`T+2` 到账、`T+3` 新组合开始承担收益。
+  - 修正 `README.md` 与 `experiment_guide.md` 中已经不存在的 `2026-03-24` 文档链接。
+  - 修正 `experiment_guide.md` 中仍指向旧 `outputs/clean`、`outputs/result`、`outputs/reports` 根目录的示例路径，统一改为 `outputs/<data_source>/...`。
+  - 补充 `fund_nav_daily_coverage_monthly.csv` 在实验产物清单中的位置。
+  - `architecture.md` 的基金池与回测分层说明同步更新为当前真实实现，不再保留“信号月末生成、下一月收益直接作为执行结果”的旧描述。
+- 目的：
+  - 避免协作者继续按旧路径或旧回测口径解读当前产物。
+  - 让入口文档、架构说明和实验指南与当前代码实现保持一致。
+
 ### 5. 基金池新增 `fund_nav_daily_coverage_monthly` 预计算月表
 
 - 变更内容：

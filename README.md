@@ -60,7 +60,7 @@
 - 月频调仓
 - 信号基于完整结束的自然月月末
 - `as_of_date` 若尚未走到当月月末，则正式最新信号月自动回退到上一个完整月
-- 下一月执行
+- 下月第 1 个交易日决策，`T` 卖出、`T+2` 到账、`T+3` 新组合开始承担收益
 
 例如：
 
@@ -92,11 +92,11 @@
 10. [docs/experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
 11. [docs/robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
 12. [docs/baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
-13. [docs/v2_baseline_review_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)
-14. [docs/v2_min_validation_plan_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_min_validation_plan_2026-03-24.md)
-15. [docs/candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
-16. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
-17. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
+13. [docs/candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
+14. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
+15. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
+16. [docs/v2_baseline_review_2026-03-25.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-25.md)
+17. [docs/v2_lite_baseline_review_2026-03-26.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-26.md)
 18. [docs/v2_lite_baseline_review_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-27.md)
 19. [docs/v2_lite_execution_risk_note_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_execution_risk_note_2026-03-27.md)
 
@@ -126,7 +126,6 @@
 - [v2_lite_baseline_review_2026-03-26.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-26.md)：当前主候选 `tushare_scoring_v2_lite` 是否升级 baseline 的正式评审记录
 - [v2_lite_baseline_review_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-27.md)：`10000` 样本快照下 `v2-lite` 的最新 baseline 升级评审记录
 - [v2_lite_execution_risk_note_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_execution_risk_note_2026-03-27.md)：`v2-lite` 相对 baseline 的执行约束与换手风险说明
-- [v2_min_validation_plan_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_min_validation_plan_2026-03-24.md)：`v2` 下一轮最小验证任务的实施计划
 - [candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)：A/B 两项候选基线验证的输出契约与当前决策规则
 - [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
 - [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)：主线迭代的变更记录
