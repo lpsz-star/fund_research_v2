@@ -396,7 +396,7 @@
 
 - 变更内容：
   - `portfolio_report` 与 `experiment_report` 新增 `Time Boundary Notes`。
-  - 新增 [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)。
+  - 相关时点边界约束后续已并入 `data_contracts.md`、`backtest_conventions.md` 与 `experiment_guide.md`，不再单独维护独立审计文档。
   - `experiment_guide.md` 增加月度经理映射表与时点边界阅读提示。
 - 目的：
   - 防止协作者把静态主表字段误读为历史月份口径，提升结果解释的一致性。

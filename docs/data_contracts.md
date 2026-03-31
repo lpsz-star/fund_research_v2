@@ -10,7 +10,55 @@
 - 份额类与基金实体分离
 - 输出结果不反向驱动源码逻辑
 
-### 1.1 tushare 基金场景常用接口在线文档链接：
+### 1.1 时间边界总则
+
+当前所有数据表在研究链路里都必须先区分两类语义：
+
+- 历史月份解释字段
+  - 用来回答“在当时那个 `month`，系统真实能看到什么”
+- 最新快照字段
+  - 用来回答“这只基金现在长什么样”
+
+默认要求是：
+
+- 任何进入基金池、特征、评分和回测信号的字段，都必须能说明自己的 `month` 与 `available_date`
+- 正式最新研究月统一取 `as_of_date` 之前最后一个完整结束的自然月
+- raw 快照中即使已经出现当月部分记录，也不能直接把该月视为正式最新信号月
+- `latest_month` 与 raw 数据中的最大月份允许不相等
+
+当前主线里，以下字段更适合解释历史月份：
+
+- `fund_universe_monthly.visible_assets_cny_mn`
+- `fund_universe_monthly.visible_history_months`
+- `fund_universe_monthly.fund_age_months`
+- `fund_universe_monthly.nav_available_date`
+- `fund_feature_monthly.manager_name`
+- `fund_feature_monthly.manager_tenure_months`
+- `fund_feature_monthly.ret_3m`
+- `fund_feature_monthly.ret_6m`
+- `fund_feature_monthly.ret_12m`
+- `fund_feature_monthly.excess_ret_12m`
+- `fund_feature_monthly.vol_12m`
+- `fund_feature_monthly.downside_vol_12m`
+- `fund_feature_monthly.max_drawdown_12m`
+- `fund_feature_monthly.asset_stability_12m`
+- `fund_score_monthly` 中全部评分字段
+
+以下字段更适合解释最新快照，不应用来直接回头解释历史月份：
+
+- `fund_entity_master.manager_name`
+- `fund_entity_master.manager_start_month`
+- `fund_entity_master.latest_assets_cny_mn`
+- `fund_entity_master.status`
+- `fund_entity_master.representative_share_class_id`
+
+后续新增字段时，默认先回答三个问题：
+
+- 它解释的是历史月份，还是当前快照
+- 它的可见时点是什么
+- 它是否需要单独保留 `available_date`
+
+### 1.2 tushare 基金场景常用接口在线文档链接：
 基金列表：https://tushare.pro/document/2?doc_id=19
 基金管理人：https://tushare.pro/document/2?doc_id=118
 基金经理：https://tushare.pro/document/2?doc_id=208
@@ -206,8 +254,9 @@
 
 - `signal_date` 由 `month` 所代表的月末近似表达
 - 正式研究只把 `as_of_date` 之前最后一个完整结束的自然月视为“最新有效 `month`”
-- `available_date` 当前与 `nav_date` 相同
-- 后续如引入披露滞后，应优先调整 `available_date`
+- `available_date` 表示研究链路真实允许使用该净值记录的日期
+- 当前已按净值披露滞后生成，不再假设与 `nav_date` 恒相同
+- 基金池、特征与评分都必须满足 `available_date <= decision_date`
 
 ### 3.4 `benchmark_monthly`
 

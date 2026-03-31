@@ -42,6 +42,15 @@
 - 即使 raw 数据里已经出现 `2025-02` 的月内记录
 - 只要 `as_of_date` 还没走到 `2025-02` 月末，它也不能成为正式最新信号月
 
+读回测与组合报告时，还必须额外区分：
+
+- `fund_universe_monthly.visible_assets_cny_mn`
+  - 用于解释历史月份的规模门槛
+- `fund_feature_monthly.manager_name` 与 `manager_tenure_months`
+  - 用于解释历史月份的经理信息
+- `fund_entity_master.*`
+  - 默认解释当前实体画像，不直接回溯解释历史月份状态
+
 ## 3. 收益计算
 
 组合毛收益：

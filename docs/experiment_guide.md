@@ -300,8 +300,8 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 1. [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/dataset_snapshot.json)
    - 先确认数据源、样本范围、主回测 benchmark 和规模口径
    - benchmark 优先看 `benchmark_name`、`benchmark_ts_code` 与 `benchmark_default_key`，不要只看 `primary_type_map`
-2. [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
-   - 先确认哪些字段能解释历史月份，哪些只是最新快照
+2. [`data_contracts.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md)
+   - 先确认哪些字段能解释历史月份，哪些只是最新快照，以及 `available_date` 的使用边界
 3. [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
    - 确认基金池是如何收缩的
 4. [`type_baseline_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_snapshot.json)
@@ -317,6 +317,7 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 
 ## 6.1 读报告时必须注意的时点边界
 
+- `data_contracts.md` 中的“时间边界总则”应视为阅读所有实验结果前的前置约束。
 - `fund_entity_master` 主要解释当前实体画像，不直接解释历史月份。
 - 历史月份的规模判断，要看 `fund_universe_monthly.visible_assets_cny_mn`。
 - 历史月份的经理解释，要看 `fund_feature_monthly.manager_name` 与 `manager_tenure_months`。
@@ -412,5 +413,4 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 - `unknown`
 
 这会降低代码版本可追踪性。
-
 

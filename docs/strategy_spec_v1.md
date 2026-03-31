@@ -45,7 +45,6 @@
 
 - [`data_contracts.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md)
 - [`data_dictionary.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_dictionary.md)
-- [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
 
 ## 3. 信号与执行定义
 
@@ -58,7 +57,6 @@
 详细时间边界与执行解释请看：
 
 - [`backtest_conventions.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
-- [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
 
 ## 4. 评分体系定义
 

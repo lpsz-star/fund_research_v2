@@ -84,21 +84,16 @@
 2. [docs/architecture.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/architecture.md)
 3. [docs/data_contracts.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md)
 4. [docs/data_dictionary.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_dictionary.md)
-5. [docs/time_boundary_audit.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
-6. [docs/strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)
-7. [docs/factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
-8. [docs/factor_iteration_framework.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_iteration_framework.md)
-9. [docs/backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
-10. [docs/experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
-11. [docs/robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
-12. [docs/baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
-13. [docs/candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
-14. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
-15. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
-16. [docs/v2_baseline_review_2026-03-25.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-25.md)
-17. [docs/v2_lite_baseline_review_2026-03-26.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-26.md)
-18. [docs/v2_lite_baseline_review_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-27.md)
-19. [docs/v2_lite_execution_risk_note_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_execution_risk_note_2026-03-27.md)
+5. [docs/strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)
+6. [docs/factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
+7. [docs/factor_iteration_framework.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_iteration_framework.md)
+8. [docs/backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
+9. [docs/experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
+10. [docs/robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
+11. [docs/baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
+12. [docs/candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
+13. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
+14. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
 
 这些文档分别覆盖：
 
@@ -112,14 +107,13 @@
 当前 `docs/` 目录下各文档职责如下：
 
 - [architecture.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/architecture.md)：系统分层、模块职责、默认设计选择
-- [data_contracts.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md)：表级数据契约、主键与时间字段约定
+- [data_contracts.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md)：表级数据契约、主键与时间字段约定，以及历史月份与最新快照的字段边界
 - [data_dictionary.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_dictionary.md)：字段级数据字典、单位和缺失语义
-- [time_boundary_audit.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)：哪些字段能解释历史月份，哪些字段只代表最新快照
 - [strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)：当前策略范围与研究口径
 - [factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)：因子字典、评分体系权重、各因子使用位置总览
 - [factor_iteration_framework.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_iteration_framework.md)：主候选评分体系的因子去留、竞争位设计与小步迭代框架
-- [backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)：信号时点、执行时点、成本与回测边界
-- [experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)：实验运行、结果阅读、可比性判断
+- [backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)：信号时点、执行时点、成本、收益计算与时间边界
+- [experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)：实验运行、结果阅读、时点边界提醒与可比性判断
 - [robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)：候选评分稳健性分析的逻辑、flag 定义与使用边界
 - [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)：候选评分是否升级为默认 baseline 的决策清单
 - [v2_baseline_review_2026-03-25.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-25.md)：旧 `tushare_scoring_v2` 在中证800口径下的正式评审记录
