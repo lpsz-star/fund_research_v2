@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from bisect import bisect_right
 from calendar import monthrange
 from datetime import date, datetime, timedelta
-from datetime import datetime
+
+
+_TRADE_CALENDAR_INDEX_CACHE: dict[int, dict[str, object]] = {}
 
 
 def month_to_int(value: str) -> int:
@@ -92,59 +95,48 @@ def current_timestamp() -> str:
 
 def first_trading_day_of_month(month: str, trade_calendar_rows: list[dict[str, object]]) -> str:
     """返回某个月的第一个交易日；缺失时抛出异常而不是静默回退。"""
-    candidates = [
-        str(row.get("cal_date", ""))
-        for row in trade_calendar_rows
-        if str(row.get("is_open", "0")) == "1" and str(row.get("cal_date", "")).startswith(month)
-    ]
-    if not candidates:
+    first_by_month = _trade_calendar_index(trade_calendar_rows)["first_by_month"]
+    if month not in first_by_month:
         raise ValueError(f"交易日历中缺少 {month} 的首个交易日。")
-    return min(candidates)
+    return str(first_by_month[month])
 
 
 def last_trading_day_of_month(month: str, trade_calendar_rows: list[dict[str, object]]) -> str:
     """返回某个月的最后一个交易日。"""
-    candidates = [
-        str(row.get("cal_date", ""))
-        for row in trade_calendar_rows
-        if str(row.get("is_open", "0")) == "1" and str(row.get("cal_date", "")).startswith(month)
-    ]
-    if not candidates:
+    last_by_month = _trade_calendar_index(trade_calendar_rows)["last_by_month"]
+    if month not in last_by_month:
         raise ValueError(f"交易日历中缺少 {month} 的最后一个交易日。")
-    return max(candidates)
+    return str(last_by_month[month])
 
 
 def next_trading_day(current_date: str, trade_calendar_rows: list[dict[str, object]]) -> str:
     """返回给定日期之后的下一个交易日。"""
-    candidates = sorted(
-        str(row.get("cal_date", ""))
-        for row in trade_calendar_rows
-        if str(row.get("is_open", "0")) == "1" and str(row.get("cal_date", "")) > current_date
-    )
-    if not candidates:
+    open_dates = _trade_calendar_index(trade_calendar_rows)["open_dates"]
+    next_index = bisect_right(open_dates, current_date)
+    if next_index >= len(open_dates):
         raise ValueError(f"交易日历中缺少 {current_date} 之后的交易日。")
-    return candidates[0]
+    return str(open_dates[next_index])
 
 
 def shift_trading_days(current_date: str, offset: int, trade_calendar_rows: list[dict[str, object]]) -> str:
     """从给定日期向后偏移若干个交易日。offset=0 返回原日期（若它是交易日）。"""
     if offset < 0:
         raise ValueError("当前仅支持向后偏移交易日。")
-    open_dates = sorted(
-        str(row.get("cal_date", ""))
-        for row in trade_calendar_rows
-        if str(row.get("is_open", "0")) == "1"
-    )
+    open_dates = _trade_calendar_index(trade_calendar_rows)["open_dates"]
     if not open_dates:
         raise ValueError("交易日历为空，无法偏移交易日。")
     if offset == 0:
         if current_date in open_dates:
             return current_date
         return next_trading_day(current_date, trade_calendar_rows)
-    shifted = current_date
-    for _ in range(offset):
-        shifted = next_trading_day(shifted, trade_calendar_rows)
-    return shifted
+    if current_date in open_dates:
+        current_index = open_dates.index(current_date)
+    else:
+        current_index = bisect_right(open_dates, current_date) - 1
+    shifted_index = current_index + offset
+    if shifted_index >= len(open_dates):
+        raise ValueError(f"交易日历中缺少 {current_date} 向后偏移 {offset} 个交易日的结果。")
+    return str(open_dates[shifted_index])
 
 
 def generate_weekday_trade_calendar(start_date: str, end_date: str, exchange: str = "SSE") -> list[dict[str, object]]:
@@ -173,3 +165,34 @@ def generate_weekday_trade_calendar(start_date: str, end_date: str, exchange: st
 def _parse_iso_date(value: str) -> date:
     """把 YYYY-MM-DD 字符串解析成 date。"""
     return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def _trade_calendar_index(trade_calendar_rows: list[dict[str, object]]) -> dict[str, object]:
+    """构建交易日历索引，避免在热点路径中反复全表扫描。"""
+    cache_key = id(trade_calendar_rows)
+    cached = _TRADE_CALENDAR_INDEX_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    open_dates: list[str] = []
+    first_by_month: dict[str, str] = {}
+    last_by_month: dict[str, str] = {}
+    for row in trade_calendar_rows:
+        cal_date = str(row.get("cal_date", "")).strip()
+        if str(row.get("is_open", "0")) != "1" or not cal_date:
+            continue
+        open_dates.append(cal_date)
+        month = cal_date[:7]
+        previous_first = first_by_month.get(month)
+        previous_last = last_by_month.get(month)
+        if previous_first is None or cal_date < previous_first:
+            first_by_month[month] = cal_date
+        if previous_last is None or cal_date > previous_last:
+            last_by_month[month] = cal_date
+    open_dates = sorted(open_dates)
+    index = {
+        "open_dates": open_dates,
+        "first_by_month": first_by_month,
+        "last_by_month": last_by_month,
+    }
+    _TRADE_CALENDAR_INDEX_CACHE[cache_key] = index
+    return index

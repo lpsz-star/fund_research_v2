@@ -16,6 +16,19 @@
   - 避免协作者继续按旧路径或旧回测口径解读当前产物。
   - 让入口文档、架构说明和实验指南与当前代码实现保持一致。
 
+### 11. 新增 `tushare_scoring_v4` 候选评分配置
+
+- 变更内容：
+  - 新增 [`configs/tushare_scoring_v4.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v4.json)。
+  - `v4` 保持基金池、回测执行代理、benchmark 与组合约束不变，只调整评分体系。
+  - 收益层改为以 `excess_ret_12m` 为主、`excess_consistency_12m` 为辅。
+  - 风险层改为以 `drawdown_duration_ratio_12m` 为主、`drawdown_recovery_ratio_12m` 为辅。
+  - 稳定层暂以 `hit_rate_12m` 与 `manager_tenure_months` 组成轻量补充，不再把当前样本中方向不稳定的规模稳定因子放进主线。
+- 目的：
+  - 基于当前因子评价结果，减少 `ret_12m` 与 `excess_ret_12m` 的重复加权。
+  - 避免继续重押 bucket 结果不支持的波动/规模稳定因子。
+  - 形成一版改动点清晰、便于与当前 baseline 做 A/B 对比的正式候选配置。
+
 ### 5. 基金池新增 `fund_nav_daily_coverage_monthly` 预计算月表
 
 - 变更内容：

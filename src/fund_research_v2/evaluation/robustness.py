@@ -378,7 +378,8 @@ def default_baseline_config_path(config_path: Path, data_source: str) -> Path:
     candidate = config_path.resolve()
     baseline_name = f"{data_source}.json"
     baseline_path = candidate.parent / baseline_name
-    if baseline_path.exists() and baseline_path != candidate:
+    # 若当前传入的就是该数据源默认 baseline，本函数应返回它本身，而不是错误回退到 default.json(sample)。
+    if baseline_path.exists():
         return baseline_path
     fallback = candidate.parent / "default.json"
     return fallback if fallback.exists() else candidate

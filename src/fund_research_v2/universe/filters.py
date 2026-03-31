@@ -4,7 +4,7 @@ from collections import defaultdict
 
 from fund_research_v2.common.config import AppConfig
 from fund_research_v2.common.contracts import DatasetSnapshot, UniverseSnapshot
-from fund_research_v2.common.date_utils import add_months, decision_date_for_month, is_available_by_decision_date, month_diff
+from fund_research_v2.common.date_utils import add_months, decision_date_for_month, month_diff
 
 
 def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnapshot:
@@ -24,19 +24,30 @@ def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnaps
     rows: list[dict[str, object]] = []
     trade_calendar_rows = dataset.trade_calendar
     open_trade_dates_by_month = _open_trade_dates_by_month(trade_calendar_rows)
+    decision_date_by_month = {
+        month: decision_date_for_month(month, trade_calendar_rows)
+        for month in sorted({str(row["month"]) for row in dataset.fund_nav_monthly})
+    }
     for entity in dataset.fund_entity_master:
         entity_id = str(entity["entity_id"])
         entity_nav = sorted(nav_by_entity.get(entity_id, []), key=lambda item: str(item["month"]))
         entity_daily_nav = sorted(daily_nav_by_entity.get(entity_id, []), key=lambda item: str(item.get("trade_date", ""))) if needs_daily_fallback else []
+        visible_nav_rows: list[dict[str, object]] = []
+        visible_index = 0
         for nav_row in entity_nav:
             month = str(nav_row["month"])
-            decision_date = decision_date_for_month(month, trade_calendar_rows)
+            decision_date = decision_date_by_month[month]
             reasons = []
-            visible_nav_rows = [
-                row for row in entity_nav
-                if str(row["month"]) <= month and is_available_by_decision_date(str(row["available_date"]), month, trade_calendar_rows)
-            ]
-            current_visible_row = next((row for row in visible_nav_rows if str(row["month"]) == month), None)
+            while visible_index < len(entity_nav):
+                candidate_row = entity_nav[visible_index]
+                candidate_month = str(candidate_row["month"])
+                if candidate_month > month:
+                    break
+                if str(candidate_row["available_date"]) > decision_date:
+                    break
+                visible_nav_rows.append(candidate_row)
+                visible_index += 1
+            current_visible_row = visible_nav_rows[-1] if visible_nav_rows and str(visible_nav_rows[-1]["month"]) == month else None
             visible_history_months = len(visible_nav_rows)
             fund_age_months = month_diff(month, str(entity["inception_month"]))
             visible_assets_cny_mn = 0.0 if current_visible_row is None else float(current_visible_row["assets_cny_mn"])

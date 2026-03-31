@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter
 import subprocess
 from pathlib import Path
+from time import perf_counter
+import sys
 
 from fund_research_v2.backtest.engine import prepare_backtest_execution_cache, run_backtest
 from fund_research_v2.common.config import AppConfig, load_config, scope_artifact_dir, to_serializable_dict
@@ -197,11 +199,13 @@ def run_backtest_command(config_path: Path) -> None:
 
 def run_experiment_command(config_path: Path, fast_mode: bool = False) -> None:
     """执行完整实验流程，包括组合、回测、报告和实验记录。"""
+    experiment_started_at = perf_counter()
     bundle = prepare_bundle(config_path)
     latest_month = _latest_research_month(bundle["config"], bundle["score_rows"])
     # 组合只取最新月评分结果，是因为实验报告默认回答“如果今天运行系统，会给出什么建议”。
     latest_scores = [row for row in bundle["score_rows"] if str(row["month"]) == latest_month]
     portfolio_rows = build_portfolio(bundle["config"], latest_scores)
+    backtest_started_at = perf_counter()
     backtest_rows, position_audit_rows = run_backtest(
         config=bundle["config"],
         score_rows=bundle["score_rows"],
@@ -211,22 +215,36 @@ def run_experiment_command(config_path: Path, fast_mode: bool = False) -> None:
         nav_daily_rows=bundle["dataset"].fund_nav_pit_daily,
         prepared_execution_cache=bundle.get("prepared_execution_cache"),
     )
+    _emit_timing("run_backtest", perf_counter() - backtest_started_at)
     backtest_summary = summarize_backtest(backtest_rows)
+    output_started_at = perf_counter()
     write_full_outputs(bundle, backtest_rows, position_audit_rows, backtest_summary, portfolio_rows, fast_mode=fast_mode)
+    _emit_timing("write_full_outputs", perf_counter() - output_started_at)
+    _emit_timing("run_experiment_total", perf_counter() - experiment_started_at)
 
 
 def prepare_bundle(config_path: Path) -> dict[str, object]:
     """构建一份贯穿研究流程的统一输入包。"""
+    bundle_started_at = perf_counter()
     config = load_config(config_path)
     project_root = resolve_project_root(config_path)
     ensure_directories(all_artifact_dirs(config, project_root))
     # 工作流统一从同一份数据快照出发，避免不同阶段读取到不一致数据。
+    stage_started_at = perf_counter()
     dataset = load_dataset(config, project_root)
+    _emit_timing("load_dataset", perf_counter() - stage_started_at)
+    stage_started_at = perf_counter()
     universe = build_universe(config, dataset)
+    _emit_timing("build_universe", perf_counter() - stage_started_at)
+    stage_started_at = perf_counter()
     feature_rows = build_feature_rows(config, dataset, universe)
+    _emit_timing("build_feature_rows", perf_counter() - stage_started_at)
+    stage_started_at = perf_counter()
     score_rows = score_funds(config, feature_rows)
+    _emit_timing("score_funds", perf_counter() - stage_started_at)
     prepared_execution_cache = None
     if dataset.trade_calendar and dataset.fund_nav_pit_daily:
+        stage_started_at = perf_counter()
         prepared_execution_cache = prepare_backtest_execution_cache(
             config=config,
             benchmark_rows=dataset.benchmark_monthly,
@@ -234,6 +252,8 @@ def prepare_bundle(config_path: Path) -> dict[str, object]:
             nav_daily_rows=dataset.fund_nav_pit_daily,
             months=sorted({str(row.get("month") or "") for row in score_rows if str(row.get("month") or "")}),
         )
+        _emit_timing("prepare_backtest_execution_cache", perf_counter() - stage_started_at)
+    _emit_timing("prepare_bundle_total", perf_counter() - bundle_started_at)
     return {
         "config": config,
         "project_root": project_root,
@@ -243,6 +263,12 @@ def prepare_bundle(config_path: Path) -> dict[str, object]:
         "score_rows": score_rows,
         "prepared_execution_cache": prepared_execution_cache,
     }
+
+
+def _emit_timing(stage: str, elapsed_seconds: float) -> None:
+    """向 stderr 输出阶段耗时，便于定位主链路性能瓶颈。"""
+    sys.stderr.write(f"[timing] {stage}: {elapsed_seconds:.3f}s\n")
+    sys.stderr.flush()
 
 
 def _latest_research_month(config: AppConfig, rows: list[dict[str, object]]) -> str:
