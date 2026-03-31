@@ -31,7 +31,6 @@
 
 - 实盘申购赎回执行
 - 高频或日频策略
-- 完整 Web 平台
 - 黑盒机器学习模型
 - 依赖人工修补原始数据的流程
 
@@ -62,19 +61,6 @@
 - `as_of_date` 若尚未走到当月月末，则正式最新信号月自动回退到上一个完整月
 - 下月第 1 个交易日决策，`T` 卖出、`T+2` 到账、`T+3` 新组合开始承担收益
 
-例如：
-
-- `as_of_date = 2026-03-21` 时，正式最新信号月不是 `2026-03`，而是 `2026-02`
-- `2026-03` 在这种情况下只能视为月内观察快照，不能当成正式研究信号
-
-当前默认组合方法为：
-
-- 规则约束法
-- 等权为主
-- 单基金权重上限
-- 单基金公司暴露上限
-
-当前默认基金池更强调“可见历史长度”和“实体规模”，不再额外使用独立的基金成立月数门槛。
 
 ## 3. 阅读与文档索引
 
@@ -96,7 +82,6 @@
 14. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
 
 这些文档分别覆盖：
-
 - 系统分层和模块职责
 - 数据表结构与字段定义
 - 历史月份与最新快照的时点边界
@@ -116,23 +101,16 @@
 - [experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)：实验运行、结果阅读、时点边界提醒与可比性判断
 - [robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)：候选评分稳健性分析的逻辑、flag 定义与使用边界
 - [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)：候选评分是否升级为默认 baseline 的决策清单
-- [v2_baseline_review_2026-03-25.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-25.md)：旧 `tushare_scoring_v2` 在中证800口径下的正式评审记录
-- [v2_lite_baseline_review_2026-03-26.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-26.md)：当前主候选 `tushare_scoring_v2_lite` 是否升级 baseline 的正式评审记录
-- [v2_lite_baseline_review_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_baseline_review_2026-03-27.md)：`10000` 样本快照下 `v2-lite` 的最新 baseline 升级评审记录
-- [v2_lite_execution_risk_note_2026-03-27.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_lite_execution_risk_note_2026-03-27.md)：`v2-lite` 相对 baseline 的执行约束与换手风险说明
 - [candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)：A/B 两项候选基线验证的输出契约与当前决策规则
 - [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
 - [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)：主线迭代的变更记录
 
 当前 `sample` 与 `tushare` 的产物目录已按数据源隔离：
-
 - `outputs/sample/...`
 - `outputs/tushare/...`
-
 这样做是为了避免跑完真实数据后，又被后续 `sample` 验证流程覆盖结果。
 
 当前 `outputs/<data_source>/` 目录也已按产物职责进一步分层：
-
 - `clean/`：标准化后的研究输入
 - `feature/`：月频特征层
 - `result/`：主策略结果，如评分、组合、回测摘要
@@ -144,7 +122,6 @@
 - `comparison/`：最近两次实验的结构化对比
 
 接入层现在还会额外输出一份标准审计产物：
-
 - `outputs/<data_source>/reports/ingestion_audit_report.md`
 - `outputs/<data_source>/reports/fund_type_audit_report.md`
 - `outputs/<data_source>/reports/fund_liquidity_audit_report.md`
@@ -153,26 +130,18 @@
 - `outputs/<data_source>/clean/fund_liquidity_audit.csv`
 
 它们专门回答两类问题：
-
 - 为什么 `fund_basic` 里看到的份额/实体，没有进入 clean 层
 - 为什么某只基金被判成 `主动股票`、`偏股混合`、`被动指数` 或 `其他`
 - 为什么某只基金因为最低持有期而被当前重视流动性的基金池排除
 
 当前 `benchmark_monthly.csv` 也已支持多条指数并行缓存：
-
 - 不再假设整个研究流程只对应一条 benchmark 序列
 - 特征层仍可按 `benchmark.primary_type_map` 读取对应指数
 - 但主回测当前固定使用 `benchmark.default_key`，不会按基金类型动态切换 benchmark
 
 真实 `tushare` 抓数现在还会额外保留单接口响应缓存：
-
 - `data/raw/tushare/api_cache/`
-
 它的作用是让后续重跑尽量复用已经成功的接口响应，而不是每次都从头联网全量抓。
-
-如果某次真实抓数只失败了少量份额类，现在还支持单独补抓失败项：
-
-- `make fetch-failed-tushare`
 
 它不会重写整份 raw 快照，而是只根据上一次 `dataset_snapshot.json` 中记录的 `fetch_diagnostics.api_error_samples`，
 对失败的 `ts_code` 重新预热 `fund_manager` / `fund_nav` / `fund_share` 这类单接口缓存，降低下一次全量重跑的无效联网开销。
@@ -184,27 +153,15 @@
 - [`configs/tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
 
 它们的用途主要是：
-
 - 作为历史候选或新候选继续做对照实验
 - 验证不同因子组合是否值得进入下一轮默认 baseline 讨论
 - 观察收益改善是否伴随波动、回撤和换仓恶化
 
 当前默认 baseline 已升级为：
-
 - [`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
 
 它当前采用的评分结构与 [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json) 一致。
 
-本轮升级的原因是：
-
-- 在 `10000` 样本快照下，`v2-lite` 相对旧 baseline 继续保持更高累计收益和超额收益
-- 收益改善来自 `selection-driven excess`，而不是 benchmark 驱动
-- 回撤没有恶化，组合集中度也没有明显变差
-- 最终人工决策接受其“略高换手、略高波动”的风险画像
-
-如果你想快速回答“每个因子是什么意思”“默认、`v2`、`v3` 分别用了哪些因子和权重”，直接看：
-
-- [docs/factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
 
 ## 4. 当前目录结构
 
