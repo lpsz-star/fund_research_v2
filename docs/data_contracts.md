@@ -152,7 +152,17 @@
 - `robustness_factor_regime.csv`
 - `robustness_report.md`
 
-### 2.8 `outputs/<data_source>/candidate_validation`
+### 2.8 `outputs/<data_source>/factor_research`
+
+因子研究框架产物层。
+
+当前包含：
+
+- `field_availability_summary.json`
+- `field_availability_audit.csv`
+- `field_availability_report.md`
+
+### 2.9 `outputs/<data_source>/candidate_validation`
 
 候选 baseline 补证层。
 
@@ -169,7 +179,7 @@
 - `excess_attribution_monthly.csv`
 - `excess_attribution_report.md`
 
-### 2.9 `outputs/<data_source>/comparison`
+### 2.10 `outputs/<data_source>/comparison`
 
 最近两次实验的差异产物层。
 

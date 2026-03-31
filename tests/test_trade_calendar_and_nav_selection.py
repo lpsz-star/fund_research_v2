@@ -96,8 +96,8 @@ class TradeCalendarAndNavSelectionTest(PipelineTestBase):
         self.assertEqual(str(row["ann_date"]), "20251001")
         self.assertEqual(str(row["update_flag"]), "0")
 
-    def test_fetch_monthly_nav_rows_uses_earliest_valid_ann_date(self) -> None:
-        """验证月频净值表继承研究唯一版本的最早可见日期。"""
+    def test_fetch_monthly_nav_rows_uses_month_last_trading_day_and_earliest_valid_ann_date(self) -> None:
+        """验证月频净值只保留月末最后交易日，并继承研究唯一版本的最早可见日期。"""
         provider = object.__new__(TushareDataProvider)
         provider.config = type(
             "ConfigLike",
@@ -111,6 +111,17 @@ class TradeCalendarAndNavSelectionTest(PipelineTestBase):
 
         nav_df = pd.DataFrame(
             [
+                {
+                    "ts_code": "015640.OF",
+                    "ann_date": "20250929",
+                    "nav_date": "20250929",
+                    "unit_nav": 1.6000,
+                    "accum_nav": 1.6000,
+                    "adj_nav": 1.6000,
+                    "net_asset": 250000.00,
+                    "total_netasset": None,
+                    "update_flag": "0",
+                },
                 {
                     "ts_code": "015640.OF",
                     "ann_date": "20251028",
@@ -146,12 +157,22 @@ class TradeCalendarAndNavSelectionTest(PipelineTestBase):
 
         provider._call_api = fake_call_api  # type: ignore[method-assign]
 
-        latest_assets, daily_rows, monthly_rows = provider._fetch_monthly_nav_rows("015640.OF", "测试基金::测试基金")
+        trade_calendar_rows = [
+            {"exchange": "SSE", "cal_date": "2025-09-29", "is_open": 1, "pretrade_date": "2025-09-26"},
+            {"exchange": "SSE", "cal_date": "2025-09-30", "is_open": 1, "pretrade_date": "2025-09-29"},
+            {"exchange": "SSE", "cal_date": "2025-10-01", "is_open": 0, "pretrade_date": "2025-09-30"},
+        ]
+        latest_assets, daily_rows, monthly_rows = provider._fetch_monthly_nav_rows(
+            "015640.OF",
+            "测试基金::测试基金",
+            trade_calendar_rows,
+        )
 
         self.assertEqual(latest_assets, 3.347)
-        self.assertEqual(len(daily_rows), 1)
-        self.assertEqual(daily_rows[0]["available_date"], "2025-10-01")
+        self.assertEqual(len(daily_rows), 2)
         self.assertEqual(len(monthly_rows), 1)
+        self.assertEqual(monthly_rows[0]["target_nav_date"], "2025-09-30")
+        self.assertEqual(monthly_rows[0]["nav_date"], "2025-09-30")
         self.assertEqual(monthly_rows[0]["available_date"], "2025-10-01")
         self.assertEqual(monthly_rows[0]["selected_update_flag"], "0")
 
@@ -215,8 +236,8 @@ class TradeCalendarAndNavSelectionTest(PipelineTestBase):
             ],
             fund_share_class_map=[],
             fund_nav_monthly=[
-                {"entity_id": "LATE", "month": "2026-01", "nav_date": "2026-01-30", "available_date": "2026-02-02", "nav": 1.0, "return_1m": 0.01, "assets_cny_mn": 500.0},
-                {"entity_id": "LATE", "month": "2026-02", "nav_date": "2026-02-27", "available_date": "2026-03-02", "nav": 1.05, "return_1m": 0.05, "assets_cny_mn": 520.0},
+                {"entity_id": "LATE", "month": "2026-01", "target_nav_date": "2026-01-30", "nav_date": "2026-01-30", "available_date": "2026-02-02", "nav": 1.0, "return_1m": 0.01, "assets_cny_mn": 500.0},
+                {"entity_id": "LATE", "month": "2026-02", "target_nav_date": "2026-02-27", "nav_date": "2026-02-27", "available_date": "2026-03-02", "nav": 1.05, "return_1m": 0.05, "assets_cny_mn": 520.0},
             ],
             benchmark_monthly=[
                 {"month": "2026-01", "benchmark_return_1m": 0.0, "available_date": "2026-02-02"},
@@ -242,7 +263,7 @@ class TradeCalendarAndNavSelectionTest(PipelineTestBase):
         self.assertEqual(universe_map["2026-01"]["decision_date"], "2026-02-02")
         self.assertEqual(int(universe_map["2026-01"]["is_eligible"]), 0)
         self.assertIn("insufficient_history", str(universe_map["2026-01"]["reason_codes"]))
-        self.assertNotIn("nav_not_available_by_decision_date", str(universe_map["2026-01"]["reason_codes"]))
+        self.assertNotIn("target_nav_announced_late", str(universe_map["2026-01"]["reason_codes"]))
         self.assertEqual(universe_map["2026-02"]["decision_date"], "2026-03-02")
-        self.assertNotIn("nav_not_available_by_decision_date", str(universe_map["2026-02"]["reason_codes"]))
+        self.assertNotIn("target_nav_announced_late", str(universe_map["2026-02"]["reason_codes"]))
         self.assertEqual(feature_map["2026-02"]["decision_date"], "2026-03-02")

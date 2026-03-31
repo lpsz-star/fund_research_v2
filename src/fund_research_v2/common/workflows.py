@@ -13,6 +13,7 @@ from fund_research_v2.common.io_utils import append_jsonl, ensure_directories, w
 from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, load_dataset, warm_failed_api_cache
 from fund_research_v2.evaluation.experiment_comparator import build_experiment_comparison, load_portfolio_snapshot, read_experiment_records
 from fund_research_v2.evaluation.candidate_validation import build_candidate_validation
+from fund_research_v2.evaluation.field_availability import build_field_availability_audit
 from fund_research_v2.evaluation.robustness import build_robustness_analysis, default_baseline_config_path
 from fund_research_v2.evaluation.metrics import summarize_backtest
 from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
@@ -25,6 +26,7 @@ from fund_research_v2.reporting.candidate_validation_reports import (
     render_excess_attribution_report,
     render_style_phase_report,
 )
+from fund_research_v2.reporting.field_availability_reports import render_field_availability_report
 from fund_research_v2.reporting.robustness_reports import render_robustness_report
 from fund_research_v2.reporting.reports import (
     render_backtest_report,
@@ -127,6 +129,20 @@ def validate_baseline_candidate_command(config_path: Path) -> None:
     render_candidate_validation_report(validation_dir / "candidate_validation_report.md", validation)
     render_style_phase_report(validation_dir / "style_phase_report.md", validation)
     render_excess_attribution_report(validation_dir / "excess_attribution_report.md", validation)
+
+
+def audit_field_availability_command(config_path: Path) -> None:
+    """输出当前研究主链路关键字段的可得性审计产物。"""
+    config = load_config(config_path)
+    project_root = resolve_project_root(config_path)
+    ensure_directories(all_artifact_dirs(config, project_root))
+    dataset = load_dataset(config, project_root)
+    audit = build_field_availability_audit(dataset)
+    output_dir = factor_research_dir(config, project_root)
+    ensure_directories([output_dir])
+    write_json(output_dir / "field_availability_summary.json", audit.get("summary", {}))
+    write_csv(output_dir / "field_availability_audit.csv", audit.get("rows", []))
+    render_field_availability_report(output_dir / "field_availability_report.md", audit)
 
 
 def run_universe_command(config_path: Path) -> None:
@@ -560,6 +576,7 @@ def all_artifact_dirs(config: AppConfig, project_root: Path) -> list[Path]:
         artifact_dir(config, project_root, config.paths.experiment_dir),
         robustness_dir(config, project_root),
         factor_evaluation_dir(config, project_root),
+        factor_research_dir(config, project_root),
         comparison_dir(config, project_root),
     ]
 
@@ -582,6 +599,11 @@ def robustness_dir(config: AppConfig, project_root: Path) -> Path:
 def factor_evaluation_dir(config: AppConfig, project_root: Path) -> Path:
     """返回因子评估的独立产物目录。"""
     return artifact_dir(config, project_root, config.paths.result_dir).parent / "factor_evaluation"
+
+
+def factor_research_dir(config: AppConfig, project_root: Path) -> Path:
+    """返回因子研究框架相关产物目录。"""
+    return artifact_dir(config, project_root, config.paths.result_dir).parent / "factor_research"
 
 
 def comparison_dir(config: AppConfig, project_root: Path) -> Path:

@@ -790,8 +790,8 @@ class PipelineTest(unittest.TestCase):
         report_text = report_path.read_text(encoding="utf-8")
 
         self.assertIn("- eligible_count: 1", report_text)
-        self.assertIn("- 满足最少历史月数后: count=1 dropped=1", report_text)
-        self.assertIn("- 满足规模门槛后: count=1 dropped=0", report_text)
+        self.assertIn("- 满足最少历史月数后: count=2 dropped=0", report_text)
+        self.assertIn("- 满足规模门槛后: count=1 dropped=1", report_text)
 
     def test_reports_use_latest_completed_month_instead_of_incomplete_current_month(self) -> None:
         """验证正式报告不会把尚未走完的当月误当成最新正式信号月。"""
@@ -873,7 +873,7 @@ class PipelineTest(unittest.TestCase):
         universe = build_universe(config, dataset)
         reason_map = {str(row["month"]): str(row["reason_codes"]) for row in universe.rows if str(row["entity_id"]) == "LATE"}
 
-        self.assertIn("nav_not_available_by_decision_date", reason_map["2026-02"])
+        self.assertIn("target_nav_announced_late", reason_map["2026-02"])
         self.assertIn("insufficient_history", reason_map["2026-02"])
 
     def test_feature_builder_does_not_use_future_available_returns(self) -> None:
@@ -1911,7 +1911,11 @@ class PipelineTest(unittest.TestCase):
         """验证实体规模按同一基金下各份额求和，而收益仍由代表份额承载。"""
         provider = object.__new__(TushareDataProvider)
 
-        def fake_fetch_monthly_nav_rows(ts_code: str, entity_id: str) -> tuple[float, list[dict[str, object]], list[dict[str, object]]]:
+        def fake_fetch_monthly_nav_rows(
+            ts_code: str,
+            entity_id: str,
+            trade_calendar_rows=None,
+        ):
             """构造 A/C 两类份额的月度净值与规模，用于隔离测试实体汇总逻辑。"""
             if ts_code == "A.OF":
                 return 110.0, [

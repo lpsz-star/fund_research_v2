@@ -13,7 +13,7 @@ from typing import Any
 
 from fund_research_v2.common.config import AppConfig, benchmark_to_serializable_dict, scope_artifact_dir
 from fund_research_v2.common.contracts import DatasetSnapshot
-from fund_research_v2.common.date_utils import add_months, current_timestamp, month_end
+from fund_research_v2.common.date_utils import add_months, current_timestamp, last_trading_day_of_month, month_end
 from fund_research_v2.common.io_utils import read_csv, read_json, read_pickle, write_csv, write_json, write_pickle
 from fund_research_v2.data_processing.daily_nav_coverage import build_daily_nav_coverage_monthly
 from fund_research_v2.data_processing.fund_liquidity_classifier import classify_fund_liquidity
@@ -197,6 +197,8 @@ def _cached_snapshot_matches_config(config: AppConfig, metadata: object) -> bool
     # 真实基金快照的规模口径升级后，需要主动淘汰旧缓存，否则会继续复用“代表份额规模”这一错误结果。
     if str(metadata.get("entity_asset_aggregation") or "").strip() != "sum_of_share_classes":
         return False
+    if str(metadata.get("nav_monthly_anchor") or "").strip() != "month_last_trading_day":
+        return False
     current_benchmark = benchmark_to_serializable_dict(config.benchmark)
     cached_benchmark = metadata.get("benchmark_config")
     if cached_benchmark == current_benchmark:
@@ -329,7 +331,7 @@ class TushareDataProvider:
         manager_rows: list[dict[str, object]] = []
         fund_type_audit_rows: list[dict[str, object]] = []
         fund_liquidity_audit_rows: list[dict[str, object]] = []
-        trade_calendar_rows: list[dict[str, object]] = []
+        trade_calendar_rows = self._fetch_trade_calendar_rows_for_config()
         dropped_entities: list[dict[str, object]] = []
         total_entities = 0
         selected_share_class_count = 0
@@ -378,7 +380,11 @@ class TushareDataProvider:
                 fund_company = str(representative_row.get("management") or "unknown")
                 company_meta = company_lookup.get(fund_company, {})
                 manager_name, manager_begin_date = self._fetch_current_manager(str(representative_row["ts_code"]))
-                latest_assets_cny_mn, entity_daily_nav_rows, entity_nav_rows = self._fetch_entity_monthly_nav_rows(rows, entity_id)
+                latest_assets_cny_mn, entity_daily_nav_rows, entity_nav_rows = self._fetch_entity_monthly_nav_rows(
+                    rows,
+                    entity_id,
+                    trade_calendar_rows,
+                )
                 if not entity_nav_rows:
                     # 没有可用月频净值的基金不能进入研究层，否则后续收益窗口和回测口径都无法成立。
                     dropped_entities.append(
@@ -477,7 +483,6 @@ class TushareDataProvider:
                     )
 
             month_set = sorted({str(row["month"]) for row in nav_rows})
-            trade_calendar_rows = self._fetch_trade_calendar_rows(month_set)
             daily_coverage_rows = build_daily_nav_coverage_monthly(
                 nav_monthly_rows=nav_rows,
                 nav_daily_rows=nav_daily_rows,
@@ -550,6 +555,7 @@ class TushareDataProvider:
                     "api_error_samples": self._api_error_samples,
                 },
                 "entity_asset_aggregation": "sum_of_share_classes",
+                "nav_monthly_anchor": "month_last_trading_day",
                 "trade_calendar": {
                     "source": "tushare_trade_cal",
                     "exchange": "SSE",
@@ -613,9 +619,10 @@ class TushareDataProvider:
         started_at = time.monotonic()
         success_ts_codes: list[str] = []
         failed_ts_codes: list[str] = []
+        trade_calendar_rows = self._fetch_trade_calendar_rows_for_config()
         for index, ts_code in enumerate(ts_codes, start=1):
             manager_df = self._fetch_manager_df(ts_code)
-            _, _, nav_rows = self._fetch_monthly_nav_rows(ts_code, ts_code)
+            _, _, nav_rows = self._fetch_monthly_nav_rows(ts_code, ts_code, trade_calendar_rows)
             if manager_df is None or nav_rows == []:
                 failed_ts_codes.append(ts_code)
             else:
@@ -707,7 +714,12 @@ class TushareDataProvider:
             )
         return assignment_rows
 
-    def _fetch_monthly_nav_rows(self, ts_code: str, entity_id: str) -> tuple[float, list[dict[str, object]], list[dict[str, object]]]:
+    def _fetch_monthly_nav_rows(
+        self,
+        ts_code: str,
+        entity_id: str,
+        trade_calendar_rows: list[dict[str, object]] | None = None,
+    ) -> tuple[float, list[dict[str, object]], list[dict[str, object]]]:
         """把单份额净值和份额数据整理为月频净值与规模序列。"""
         if ts_code in self._monthly_nav_cache:
             return self._monthly_nav_cache[ts_code]
@@ -741,9 +753,10 @@ class TushareDataProvider:
         nav_df["normalized_available_date"] = nav_df.apply(lambda row: _nav_effective_available_date(row), axis=1)
         selected_nav_df = _select_point_in_time_nav_rows(nav_df)
         daily_rows = _build_selected_daily_nav_rows(selected_nav_df, entity_id, ts_code)
+        monthly_selected_nav_df = _select_month_end_trading_day_nav_rows(selected_nav_df, trade_calendar_rows or [])
         monthly_rows = []
         previous_nav = None
-        for _, group in selected_nav_df.groupby(selected_nav_df["nav_date"].str.slice(0, 6), sort=True):
+        for _, group in monthly_selected_nav_df.groupby(monthly_selected_nav_df["nav_date"].str.slice(0, 6), sort=True):
             record = group.sort_values(["nav_date", "normalized_available_date"]).iloc[-1]
             current_nav = float(record["nav_numeric"])
             if current_nav <= 0:
@@ -754,6 +767,7 @@ class TushareDataProvider:
                 {
                     "entity_id": entity_id,
                     "month": month,
+                    "target_nav_date": _normalize_date(record["target_nav_date"]),
                     "nav_date": _normalize_date(record["nav_date"]),
                     # 研究口径固定使用“最早公告且净值有效”的首个可见版本。
                     "available_date": _normalize_date(record["normalized_available_date"]),
@@ -762,6 +776,7 @@ class TushareDataProvider:
                     "assets_cny_mn": round(current_assets, 3),
                     "selected_ann_date": _normalize_date(record["normalized_available_date"]),
                     "selected_update_flag": str(record.get("update_flag") or "0"),
+                    "nav_selection_reason": "month_last_trading_day_only",
                 }
             )
             previous_nav = current_nav
@@ -769,13 +784,14 @@ class TushareDataProvider:
         self._monthly_nav_cache[ts_code] = (float(latest_assets), daily_rows, monthly_rows)
         return self._monthly_nav_cache[ts_code]
 
-    def _fetch_trade_calendar_rows(self, month_set: list[str]) -> list[dict[str, object]]:
-        """抓取覆盖研究区间的交易日日历，供后续决策日和收益归属规则使用。"""
-        if not month_set:
-            return []
-        start_date = f"{month_set[0][:4]}{month_set[0][5:7]}01"
-        calendar_end_month = add_months(month_set[-1], 1)
-        end_date = month_end(calendar_end_month).replace("-", "")
+    def _fetch_trade_calendar_rows_for_config(self) -> list[dict[str, object]]:
+        """抓取覆盖研究区间的交易日日历，供净值锚点、决策日和收益归属规则使用。"""
+        start_date = str(self.config.tushare.start_date or "").strip() or "20000101"
+        if self.config.tushare.end_date:
+            end_date = str(self.config.tushare.end_date).replace("-", "")
+        else:
+            calendar_end_month = add_months(self.config.as_of_date[:7], 2)
+            end_date = month_end(calendar_end_month).replace("-", "")
         calendar_df = self._call_api(
             "trade_cal",
             self.client.trade_cal,
@@ -802,16 +818,25 @@ class TushareDataProvider:
         self,
         share_class_rows: list[dict[str, object]],
         entity_id: str,
+        trade_calendar_rows: list[dict[str, object]] | None = None,
     ) -> tuple[float, list[dict[str, object]], list[dict[str, object]]]:
         """以代表份额承载收益序列，并把同实体各份额规模汇总到实体层。"""
         representative_row = _select_representative_share_class(share_class_rows)
-        representative_assets, representative_daily_rows, representative_nav_rows = self._fetch_monthly_nav_rows(str(representative_row["ts_code"]), entity_id)
+        representative_assets, representative_daily_rows, representative_nav_rows = self._fetch_monthly_nav_rows(
+            str(representative_row["ts_code"]),
+            entity_id,
+            trade_calendar_rows,
+        )
         if not representative_nav_rows:
             return representative_assets, [], []
         asset_rows_by_share_class: list[list[dict[str, object]]] = []
         asset_daily_rows_by_share_class: list[list[dict[str, object]]] = []
         for row in share_class_rows:
-            _, share_daily_rows, share_nav_rows = self._fetch_monthly_nav_rows(str(row["ts_code"]), entity_id)
+            _, share_daily_rows, share_nav_rows = self._fetch_monthly_nav_rows(
+                str(row["ts_code"]),
+                entity_id,
+                trade_calendar_rows,
+            )
             if share_nav_rows:
                 asset_rows_by_share_class.append(share_nav_rows)
             if share_daily_rows:
@@ -1394,6 +1419,24 @@ def _select_point_in_time_nav_rows(nav_df: Any) -> Any:
         )
         selected_rows.append(ordered.iloc[0].to_dict())
     return nav_df.iloc[0:0] if not selected_rows else nav_df.__class__(selected_rows)
+
+
+def _select_month_end_trading_day_nav_rows(selected_nav_df: Any, trade_calendar_rows: list[dict[str, object]]) -> Any:
+    """对月频研究层只保留每个月最后一个交易日对应的净值记录。"""
+    if selected_nav_df is None or selected_nav_df.empty:
+        return selected_nav_df
+    if not trade_calendar_rows:
+        return selected_nav_df
+    selected_nav_df = selected_nav_df.copy()
+    selected_nav_df["month"] = selected_nav_df["nav_date"].astype(str).str.slice(0, 6).apply(_normalize_month)
+    selected_nav_df["normalized_nav_date"] = selected_nav_df["nav_date"].apply(_normalize_date)
+    target_nav_date_by_month = {
+        month: last_trading_day_of_month(month, trade_calendar_rows)
+        for month in sorted({str(value) for value in selected_nav_df["month"].tolist()})
+    }
+    selected_nav_df["target_nav_date"] = selected_nav_df["month"].map(target_nav_date_by_month)
+    filtered_df = selected_nav_df[selected_nav_df["normalized_nav_date"] == selected_nav_df["target_nav_date"]]
+    return filtered_df.iloc[0:0] if filtered_df.empty else filtered_df
 
 
 def _nav_effective_available_date(row: Any) -> str:

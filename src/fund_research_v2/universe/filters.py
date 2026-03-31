@@ -24,18 +24,19 @@ def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnaps
     rows: list[dict[str, object]] = []
     trade_calendar_rows = dataset.trade_calendar
     open_trade_dates_by_month = _open_trade_dates_by_month(trade_calendar_rows)
+    all_months = sorted({str(row["month"]) for row in dataset.fund_nav_monthly})
     decision_date_by_month = {
         month: decision_date_for_month(month, trade_calendar_rows)
-        for month in sorted({str(row["month"]) for row in dataset.fund_nav_monthly})
+        for month in all_months
     }
     for entity in dataset.fund_entity_master:
         entity_id = str(entity["entity_id"])
         entity_nav = sorted(nav_by_entity.get(entity_id, []), key=lambda item: str(item["month"]))
+        nav_lookup_by_month = {str(row["month"]): row for row in entity_nav}
         entity_daily_nav = sorted(daily_nav_by_entity.get(entity_id, []), key=lambda item: str(item.get("trade_date", ""))) if needs_daily_fallback else []
         visible_nav_rows: list[dict[str, object]] = []
         visible_index = 0
-        for nav_row in entity_nav:
-            month = str(nav_row["month"])
+        for month in all_months:
             decision_date = decision_date_by_month[month]
             reasons = []
             while visible_index < len(entity_nav):
@@ -47,6 +48,7 @@ def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnaps
                     break
                 visible_nav_rows.append(candidate_row)
                 visible_index += 1
+            month_nav_row = nav_lookup_by_month.get(month)
             current_visible_row = visible_nav_rows[-1] if visible_nav_rows and str(visible_nav_rows[-1]["month"]) == month else None
             visible_history_months = len(visible_nav_rows)
             fund_age_months = month_diff(month, str(entity["inception_month"]))
@@ -72,8 +74,10 @@ def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnaps
             if trailing_nav_coverage_months > 0 and trailing_nav_coverage_ratio < config.universe.min_daily_nav_coverage_ratio:
                 # 这里刻意只看 decision_date 前已可见的历史日频覆盖率，避免把未来持有期缺失“倒灌”到当前信号。
                 reasons.append("sparse_daily_nav_coverage")
-            if current_visible_row is None:
-                reasons.append("nav_not_available_by_decision_date")
+            if month_nav_row is None:
+                reasons.append("target_nav_missing")
+            elif current_visible_row is None:
+                reasons.append("target_nav_announced_late")
             if visible_history_months < config.universe.min_history_months:
                 reasons.append("insufficient_history")
             if current_visible_row is None or visible_assets_cny_mn < config.universe.min_assets_cny_mn:
@@ -90,6 +94,7 @@ def build_universe(config: AppConfig, dataset: DatasetSnapshot) -> UniverseSnaps
                     "visible_history_months": visible_history_months,
                     "fund_age_months": fund_age_months,
                     "visible_assets_cny_mn": round(visible_assets_cny_mn, 3),
+                    "target_nav_date": "" if month_nav_row is None else str(month_nav_row.get("target_nav_date") or month_nav_row.get("nav_date") or ""),
                     "nav_available_date": "" if current_visible_row is None else str(current_visible_row["available_date"]),
                     "decision_date": decision_date,
                     "trailing_daily_nav_coverage_ratio": round(trailing_nav_coverage_ratio, 6),

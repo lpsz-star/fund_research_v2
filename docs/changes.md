@@ -623,3 +623,11 @@
   - 增补对应回归测试，避免候选配置中引用新字段时被错误按默认高值方向处理。
 - 目的：
   - 防止 `v3` 这类实验配置在接入新观察层因子后，因方向表缺失而得到错误评分结果。
+### 12. 新增字段可得性审计主线与因子研究框架
+
+- 变更内容：
+  - 新增 CLI 命令 `audit-field-availability`，输出 `outputs/<data_source>/factor_research/field_availability_audit.csv`、`field_availability_summary.json` 与 `field_availability_report.md`。
+  - 新增 [`factor_research_framework.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_research_framework.md)，把字段审计、单因子评价、增量贡献测试、组合层验证和 baseline 升级决策串成统一研究流程。
+  - `README.md` 同步加入新的研究框架文档索引。
+- 目的：
+  - 先补齐“字段是否历史可得”和“单因子如何进入正式评分体系”的研究底座，再推进下一版候选评分体系。

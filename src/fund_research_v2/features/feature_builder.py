@@ -16,6 +16,7 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
     for row in dataset.manager_assignment_monthly:
         manager_rows_by_entity[str(row["entity_id"])].append(row)
     eligibility = {(str(row["entity_id"]), str(row["month"])): int(row["is_eligible"]) for row in universe.rows}
+    eligibility_reasons = {(str(row["entity_id"]), str(row["month"])): str(row.get("reason_codes") or "") for row in universe.rows}
     nav_by_entity: dict[str, list[dict[str, object]]] = defaultdict(list)
     benchmark_rows = sorted(dataset.benchmark_monthly, key=lambda item: str(item["month"]))
     trade_calendar_rows = dataset.trade_calendar
@@ -97,6 +98,10 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
                     "benchmark_key": benchmark_key,
                     "benchmark_name": benchmark_series.name,
                     "decision_date": decision_date,
+                    "target_nav_date": str(current_visible_row.get("target_nav_date") or current_visible_row.get("nav_date") or ""),
+                    "target_nav_available_by_decision_date": 1 if eligibility[(entity_id, month)] == 1 else 0,
+                    "feature_observation_status": "eligible" if eligibility[(entity_id, month)] == 1 else "observational_only",
+                    "eligibility_reason_codes": eligibility_reasons.get((entity_id, month), ""),
                     "manager_name": _manager_name_for_month(entity, manager_row),
                     "ret_3m": _window_total_return(returns, index, 3),
                     "ret_6m": _window_total_return(returns, index, 6),

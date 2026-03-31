@@ -6,6 +6,7 @@ from pathlib import Path
 from fund_research_v2.common.config import load_config
 from fund_research_v2.common.workflows import (
     analyze_robustness_command,
+    audit_field_availability_command,
     compare_experiments_command,
     fetch_command,
     fetch_failed_command,
@@ -30,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
         "fetch-failed",
         "compare-experiments",
         "analyze-robustness",
+        "audit-field-availability",
         "validate-baseline-candidate",
         "build-universe",
         "compute-features",
@@ -64,6 +66,7 @@ def main() -> int:
         "fetch-failed": fetch_failed_command,
         "compare-experiments": compare_experiments_command,
         "analyze-robustness": analyze_robustness_command,
+        "audit-field-availability": audit_field_availability_command,
         "validate-baseline-candidate": validate_baseline_candidate_command,
         "build-universe": run_universe_command,
         "compute-features": run_feature_command,

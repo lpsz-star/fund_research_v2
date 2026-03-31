@@ -76,6 +76,18 @@ PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/t
 PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config configs/tushare_scoring_v2.json
 ```
 
+如果你要先核查一轮“字段是不是历史可得、能不能进入正式因子研究”，建议执行：
+
+```bash
+PYTHONPATH=src python3 -m fund_research_v2 audit-field-availability --config configs/tushare.json
+```
+
+优先查看：
+
+- [`field_availability_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/factor_research/field_availability_report.md)
+- [`field_availability_audit.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/factor_research/field_availability_audit.csv)
+- [`factor_research_framework.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_research_framework.md)
+
 这条命令会把 A/B 两项补证产物写到独立目录：
 
 - `outputs/<data_source>/candidate_validation/`
@@ -413,4 +425,3 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 - `unknown`
 
 这会降低代码版本可追踪性。
-
