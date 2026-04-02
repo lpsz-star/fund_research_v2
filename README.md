@@ -72,13 +72,13 @@
 4. [docs/data_dictionary.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_dictionary.md)
 5. [docs/strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)
 6. [docs/factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)
-7. [docs/factor_iteration_framework.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_iteration_framework.md)
-8. [docs/factor_research_framework.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_research_framework.md)
-9. [docs/backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
-10. [docs/experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
-11. [docs/robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
-12. [docs/baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
-13. [docs/candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
+7. [docs/factor_research_framework.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_research_framework.md)
+8. [docs/backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)
+9. [docs/experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)
+10. [docs/robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
+11. [docs/baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
+12. [docs/candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
+13. [docs/config_governance.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/config_governance.md)
 14. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
 15. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
 
@@ -87,6 +87,8 @@
 - 数据表结构与字段定义
 - 历史月份与最新快照的时点边界
 - 当前策略、因子与回测口径
+- 候选研究与 baseline 升级证据链
+- 配置治理与实验入口约定
 - 实验运行方式与可比性判断
 - 已知错误与近期变更
 
@@ -97,20 +99,16 @@
 - [data_dictionary.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_dictionary.md)：字段级数据字典、单位和缺失语义
 - [strategy_spec_v1.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/strategy_spec_v1.md)：当前策略范围与研究口径
 - [factor_catalog.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_catalog.md)：因子字典、评分体系权重、各因子使用位置总览
-- [factor_iteration_framework.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_iteration_framework.md)：主候选评分体系的因子去留、竞争位设计与小步迭代框架
 - [factor_research_framework.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_research_framework.md)：因子准入、增量贡献测试、组合层验证与 baseline 升级前置方法论
 - [backtest_conventions.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)：信号时点、执行时点、成本、收益计算与时间边界
 - [experiment_guide.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)：实验运行、结果阅读、时点边界提醒与可比性判断
 - [robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)：候选评分稳健性分析的逻辑、flag 定义与使用边界
 - [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)：候选评分是否升级为默认 baseline 的决策清单
 - [candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)：A/B 两项候选基线验证的输出契约与当前决策规则
+- [config_governance.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/config_governance.md)：baseline、candidate、archive 三层配置结构与维护规则
 - [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
 - [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)：主线迭代的变更记录
 
-当前 `sample` 与 `tushare` 的产物目录已按数据源隔离：
-- `outputs/sample/...`
-- `outputs/tushare/...`
-这样做是为了避免跑完真实数据后，又被后续 `sample` 验证流程覆盖结果。
 
 当前 `outputs/<data_source>/` 目录也已按产物职责进一步分层：
 - `clean/`：标准化后的研究输入
@@ -123,30 +121,6 @@
 - `candidate_validation/`：候选 baseline 补证
 - `comparison/`：最近两次实验的结构化对比
 
-接入层现在还会额外输出一份标准审计产物：
-- `outputs/<data_source>/reports/ingestion_audit_report.md`
-- `outputs/<data_source>/reports/fund_type_audit_report.md`
-- `outputs/<data_source>/reports/fund_liquidity_audit_report.md`
-- `outputs/<data_source>/clean/dropped_entities.csv`
-- `outputs/<data_source>/clean/fund_type_audit.csv`
-- `outputs/<data_source>/clean/fund_liquidity_audit.csv`
-
-它们专门回答两类问题：
-- 为什么 `fund_basic` 里看到的份额/实体，没有进入 clean 层
-- 为什么某只基金被判成 `主动股票`、`偏股混合`、`被动指数` 或 `其他`
-- 为什么某只基金因为最低持有期而被当前重视流动性的基金池排除
-
-当前 `benchmark_monthly.csv` 也已支持多条指数并行缓存：
-- 不再假设整个研究流程只对应一条 benchmark 序列
-- 特征层仍可按 `benchmark.primary_type_map` 读取对应指数
-- 但主回测当前固定使用 `benchmark.default_key`，不会按基金类型动态切换 benchmark
-
-真实 `tushare` 抓数现在还会额外保留单接口响应缓存：
-- `data/raw/tushare/api_cache/`
-它的作用是让后续重跑尽量复用已经成功的接口响应，而不是每次都从头联网全量抓。
-
-它不会重写整份 raw 快照，而是只根据上一次 `dataset_snapshot.json` 中记录的 `fetch_diagnostics.api_error_samples`，
-对失败的 `ts_code` 重新预热 `fund_manager` / `fund_nav` / `fund_share` 这类单接口缓存，降低下一次全量重跑的无效联网开销。
 
 当前配置按三层管理：
 
@@ -293,12 +267,6 @@ make run-sample
 make run-tushare
 ```
 
-如果上一次 `fetch-tushare` 或 `run-tushare` 主要是因为少量接口失败，可以先执行：
-
-```bash
-make fetch-failed-tushare
-make run-tushare
-```
 
 建议阅读：
 
@@ -582,43 +550,3 @@ PYTHONPATH=src python3 -m fund_research_v2 run-ranking --config configs/tushare.
 当前典型文件：
 
 - `experiment_registry.jsonl`
-
-## 9. 配置说明
-
-配置文件在 [default.json](/Users/liupeng/.codex/projects/fund_research_v2/configs/default.json)。
-
-当前主要配置段包括：
-
-- `data_source`
-- `lookback_months`
-- `universe`
-- `ranking`
-- `portfolio`
-- `backtest`
-- `reporting`
-- `tushare`
-- `paths`
-
-这意味着：
-
-- 基金池规则是配置驱动的
-- 因子权重是配置驱动的
-- 组合约束是配置驱动的
-- 回测成本与 benchmark 是配置驱动的
-
-## 10. 测试
-
-运行测试：
-
-```bash
-make test
-```
-
-当前测试覆盖了：
-
-- 主流程输出
-- 基金池过滤
-- 组合约束
-- 回测执行时序
-- CLI 基本入口
-- 缓存读取
