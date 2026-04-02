@@ -5,7 +5,7 @@ from math import sqrt
 
 from fund_research_v2.common.config import AppConfig
 from fund_research_v2.common.contracts import DatasetSnapshot, UniverseSnapshot
-from fund_research_v2.common.date_utils import is_available_by_month_end, month_diff
+from fund_research_v2.common.date_utils import decision_date_for_month, is_available_by_decision_date, month_diff
 
 
 def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: UniverseSnapshot) -> list[dict[str, object]]:
@@ -16,31 +16,61 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
     for row in dataset.manager_assignment_monthly:
         manager_rows_by_entity[str(row["entity_id"])].append(row)
     eligibility = {(str(row["entity_id"]), str(row["month"])): int(row["is_eligible"]) for row in universe.rows}
+    eligibility_reasons = {(str(row["entity_id"]), str(row["month"])): str(row.get("reason_codes") or "") for row in universe.rows}
     nav_by_entity: dict[str, list[dict[str, object]]] = defaultdict(list)
     benchmark_rows = sorted(dataset.benchmark_monthly, key=lambda item: str(item["month"]))
+    trade_calendar_rows = dataset.trade_calendar
     for row in dataset.fund_nav_monthly:
         nav_by_entity[str(row["entity_id"])].append(row)
+    all_months = sorted({str(row["month"]) for row in dataset.fund_nav_monthly})
+    decision_date_by_month = {month: decision_date_for_month(month, trade_calendar_rows) for month in all_months}
+    benchmark_lookup_map_by_month = _visible_benchmark_lookup_map_by_month(
+        benchmark_rows,
+        all_months,
+        config.benchmark.default_key,
+        decision_date_by_month,
+    )
     feature_rows = []
     for entity_id, nav_rows in nav_by_entity.items():
         nav_rows = sorted(nav_rows, key=lambda item: str(item["month"]))
         entity = entity_lookup[entity_id]
         raw_months = [str(row["month"]) for row in nav_rows]
+        visible_nav_rows: list[dict[str, object]] = []
+        visible_nav_index = 0
+        manager_rows = sorted(manager_rows_by_entity.get(entity_id, []), key=lambda item: str(item["month"]))
+        visible_manager_rows: list[dict[str, object]] = []
+        visible_manager_index = 0
         for month in raw_months:
-            visible_rows = [row for row in nav_rows if str(row["month"]) <= month and is_available_by_month_end(str(row["available_date"]), month)]
-            if not visible_rows:
+            decision_date = decision_date_by_month[month]
+            while visible_nav_index < len(nav_rows):
+                candidate_row = nav_rows[visible_nav_index]
+                candidate_month = str(candidate_row["month"])
+                if candidate_month > month:
+                    break
+                if str(candidate_row["available_date"]) > decision_date:
+                    break
+                visible_nav_rows.append(candidate_row)
+                visible_nav_index += 1
+            if not visible_nav_rows:
                 continue
-            current_visible_row = next((row for row in visible_rows if str(row["month"]) == month), None)
+            current_visible_row = visible_nav_rows[-1] if str(visible_nav_rows[-1]["month"]) == month else None
             if current_visible_row is None:
-                # 若当月净值在月末前尚不可见，则该月不能形成合法信号，也不应生成特征行。
+                # 若当月净值在决策日前尚不可见，则该月不能形成合法信号，也不应生成特征行。
                 continue
+            while visible_manager_index < len(manager_rows):
+                candidate_manager_row = manager_rows[visible_manager_index]
+                if str(candidate_manager_row["month"]) > month:
+                    break
+                visible_manager_rows.append(candidate_manager_row)
+                visible_manager_index += 1
             # 所有滚动窗口都基于“截至当月末已可见”的历史序列，而不是事后补全后的完整历史。
-            returns = [float(row["return_1m"]) for row in visible_rows]
-            navs = [float(row["nav"]) for row in visible_rows]
-            assets = [float(row["assets_cny_mn"]) for row in visible_rows]
-            months = [str(row["month"]) for row in visible_rows]
+            returns = [float(row["return_1m"]) for row in visible_nav_rows]
+            navs = [float(row["nav"]) for row in visible_nav_rows]
+            assets = [float(row["assets_cny_mn"]) for row in visible_nav_rows]
+            months = [str(row["month"]) for row in visible_nav_rows]
             index = len(months) - 1
             benchmark_key = config.benchmark.key_for_primary_type(str(entity["primary_type"]))
-            benchmark_lookup_map = _visible_benchmark_lookup_map(benchmark_rows, month, config.benchmark.default_key)
+            benchmark_lookup_map = benchmark_lookup_map_by_month.get(month, {})
             benchmark_lookup = _benchmark_lookup_for_key(benchmark_lookup_map, benchmark_key, config.benchmark.default_key)
             benchmark_series = config.benchmark.series_for_key(benchmark_key)
             excess_ret_3m = round(_window_total_return(returns, index, 3) - _window_total_return_from_scalar(benchmark_lookup, months, index, 3), 6)
@@ -49,10 +79,6 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
             monthly_excess_returns = _monthly_excess_returns(returns, months, benchmark_lookup)
             benchmark_returns = [benchmark_lookup.get(visible_month, 0.0) for visible_month in months]
             manager_row = manager_lookup.get((entity_id, month))
-            visible_manager_rows = [
-                row for row in sorted(manager_rows_by_entity.get(entity_id, []), key=lambda item: str(item["month"]))
-                if str(row["month"]) <= month
-            ]
             manager_post_change_excess_delta_12m, manager_post_change_observation_months = _manager_post_change_excess_delta(
                 months=months,
                 monthly_excess_returns=monthly_excess_returns,
@@ -71,6 +97,11 @@ def build_feature_rows(config: AppConfig, dataset: DatasetSnapshot, universe: Un
                     "primary_type": entity["primary_type"],
                     "benchmark_key": benchmark_key,
                     "benchmark_name": benchmark_series.name,
+                    "decision_date": decision_date,
+                    "target_nav_date": str(current_visible_row.get("target_nav_date") or current_visible_row.get("nav_date") or ""),
+                    "target_nav_available_by_decision_date": 1 if eligibility[(entity_id, month)] == 1 else 0,
+                    "feature_observation_status": "eligible" if eligibility[(entity_id, month)] == 1 else "observational_only",
+                    "eligibility_reason_codes": eligibility_reasons.get((entity_id, month), ""),
                     "manager_name": _manager_name_for_month(entity, manager_row),
                     "ret_3m": _window_total_return(returns, index, 3),
                     "ret_6m": _window_total_return(returns, index, 6),
@@ -196,16 +227,47 @@ def _visible_benchmark_lookup_map(
     benchmark_rows: list[dict[str, object]],
     signal_month: str,
     default_benchmark_key: str,
+    trade_calendar_rows: list[dict[str, object]],
 ) -> dict[str, dict[str, float]]:
     """构建截至某个信号月末实际可见的 benchmark 月收益映射。"""
     visible_lookup: dict[str, dict[str, float]] = defaultdict(dict)
     for row in benchmark_rows:
         month = str(row["month"])
         available_date = _benchmark_available_date(row)
-        if month <= signal_month and is_available_by_month_end(available_date, signal_month):
+        if month <= signal_month and is_available_by_decision_date(available_date, signal_month, trade_calendar_rows):
             benchmark_key = str(row.get("benchmark_key") or default_benchmark_key)
             visible_lookup[benchmark_key][month] = float(row["benchmark_return_1m"])
     return visible_lookup
+
+
+def _visible_benchmark_lookup_map_by_month(
+    benchmark_rows: list[dict[str, object]],
+    signal_months: list[str],
+    default_benchmark_key: str,
+    decision_date_by_month: dict[str, str],
+) -> dict[str, dict[str, dict[str, float]]]:
+    """预计算各信号月的可见 benchmark 收益映射，避免热点路径中重复全表扫描。"""
+    if not signal_months:
+        return {}
+    benchmark_rows = sorted(benchmark_rows, key=lambda item: (str(item["month"]), _benchmark_available_date(item), str(item.get("benchmark_key") or default_benchmark_key)))
+    visible_by_month: dict[str, dict[str, dict[str, float]]] = {}
+    current_visible: dict[str, dict[str, float]] = defaultdict(dict)
+    benchmark_index = 0
+    for signal_month in sorted(signal_months):
+        decision_date = decision_date_by_month[signal_month]
+        while benchmark_index < len(benchmark_rows):
+            row = benchmark_rows[benchmark_index]
+            month = str(row["month"])
+            available_date = _benchmark_available_date(row)
+            if month > signal_month:
+                break
+            if available_date > decision_date:
+                break
+            benchmark_key = str(row.get("benchmark_key") or default_benchmark_key)
+            current_visible[benchmark_key][month] = float(row["benchmark_return_1m"])
+            benchmark_index += 1
+        visible_by_month[signal_month] = {key: dict(value) for key, value in current_visible.items()}
+    return visible_by_month
 
 
 def _benchmark_lookup_for_key(

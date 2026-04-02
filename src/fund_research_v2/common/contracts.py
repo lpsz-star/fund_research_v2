@@ -15,6 +15,9 @@ class DatasetSnapshot:
     fund_type_audit: list[dict[str, object]]
     metadata: dict[str, object]
     fund_liquidity_audit: list[dict[str, object]] = field(default_factory=list)
+    trade_calendar: list[dict[str, object]] = field(default_factory=list)
+    fund_nav_pit_daily: list[dict[str, object]] = field(default_factory=list)
+    fund_nav_daily_coverage_monthly: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -7,9 +7,11 @@ class PipelineIntegrationTest(PipelineTestBase):
 
     # 完整实验与对比工作流，验证跨模块主链路可以产出一整套研究结果。
     test_run_experiment_writes_outputs = LegacyPipelineTest.test_run_experiment_writes_outputs
+    test_run_experiment_fast_skips_heavy_outputs_but_keeps_core_results = LegacyPipelineTest.test_run_experiment_fast_skips_heavy_outputs_but_keeps_core_results
     test_compare_experiments_writes_diff_artifacts = LegacyPipelineTest.test_compare_experiments_writes_diff_artifacts
     # CLI 路由测试只关心命令是否正确分发到 workflow 入口。
     test_cli_dispatches_compare_experiments_command = LegacyPipelineTest.test_cli_dispatches_compare_experiments_command
+    test_cli_dispatches_run_experiment_fast_mode = LegacyPipelineTest.test_cli_dispatches_run_experiment_fast_mode
     test_cli_dispatches_analyze_robustness_command = LegacyPipelineTest.test_cli_dispatches_analyze_robustness_command
     # 这些测试覆盖“命令 -> 输出文件/报告”的协同行为，而不是单个纯函数。
     test_fetch_failed_command_writes_retry_summary_and_report = LegacyPipelineTest.test_fetch_failed_command_writes_retry_summary_and_report
@@ -20,5 +22,6 @@ class PipelineIntegrationTest(PipelineTestBase):
     # 组合构建与回测执行规则虽然局部可解释，但这里验证的是主流程中的集成语义。
     test_portfolio_limits_single_company_exposure = LegacyPipelineTest.test_portfolio_limits_single_company_exposure
     test_backtest_respects_next_month_execution = LegacyPipelineTest.test_backtest_respects_next_month_execution
+    test_backtest_daily_execution_uses_t_plus_2_cash_and_t_plus_3_new_holdings = LegacyPipelineTest.test_backtest_daily_execution_uses_t_plus_2_cash_and_t_plus_3_new_holdings
     test_cli_fetch_uses_fetch_command = LegacyPipelineTest.test_cli_fetch_uses_fetch_command
     test_cli_run_portfolio_uses_portfolio_command = LegacyPipelineTest.test_cli_run_portfolio_uses_portfolio_command

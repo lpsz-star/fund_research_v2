@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ class UniverseConfig:
     exclude_name_keywords: list[str]
     min_history_months: int
     min_assets_cny_mn: float
+    min_daily_nav_coverage_ratio: float
+    daily_nav_coverage_lookback_months: int
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,9 @@ class BacktestConfig:
     transaction_cost_bps: float
     missing_return_policy: str
     missing_weight_warning_threshold: float
+    redemption_settlement_lag_days: int
+    purchase_effective_lag_days: int
+    cash_return_model: str
 
 
 @dataclass(frozen=True)
@@ -155,7 +161,14 @@ def load_config(path: Path) -> AppConfig:
         data_source=raw.get("data_source", "sample"),
         lookback_months=int(raw.get("lookback_months", 48)),
         local_secret_path=Path(raw.get("local_secret_path", "configs/local.json")),
-        universe=UniverseConfig(**raw["universe"]),
+        universe=UniverseConfig(
+            allowed_primary_types=raw["universe"]["allowed_primary_types"],
+            exclude_name_keywords=raw["universe"]["exclude_name_keywords"],
+            min_history_months=int(raw["universe"]["min_history_months"]),
+            min_assets_cny_mn=float(raw["universe"]["min_assets_cny_mn"]),
+            min_daily_nav_coverage_ratio=float(raw["universe"].get("min_daily_nav_coverage_ratio", 0.6)),
+            daily_nav_coverage_lookback_months=int(raw["universe"].get("daily_nav_coverage_lookback_months", 6)),
+        ),
         ranking=RankingConfig(
             candidate_count=int(raw["ranking"]["candidate_count"]),
             factor_weights={key: float(value) for key, value in raw["ranking"]["factor_weights"].items()},
@@ -177,6 +190,9 @@ def load_config(path: Path) -> AppConfig:
             transaction_cost_bps=float(raw["backtest"].get("transaction_cost_bps", 10.0)),
             missing_return_policy=raw["backtest"].get("missing_return_policy", "zero_fill_legacy"),
             missing_weight_warning_threshold=float(raw["backtest"].get("missing_weight_warning_threshold", 0.05)),
+            redemption_settlement_lag_days=int(raw["backtest"].get("redemption_settlement_lag_days", 2)),
+            purchase_effective_lag_days=int(raw["backtest"].get("purchase_effective_lag_days", 1)),
+            cash_return_model=raw["backtest"].get("cash_return_model", "zero"),
         ),
         benchmark=benchmark,
         reporting=ReportingConfig(top_ranked_limit=int(raw["reporting"].get("top_ranked_limit", 10))),
@@ -237,6 +253,10 @@ def _validate(config: AppConfig) -> None:
         raise ValueError("portfolio.single_company_max 必须大于 0。")
     if config.portfolio.single_fund_cap <= 0 or config.portfolio.single_fund_cap > 1:
         raise ValueError("portfolio.single_fund_cap 必须位于 (0, 1]。")
+    if config.universe.min_daily_nav_coverage_ratio <= 0 or config.universe.min_daily_nav_coverage_ratio > 1:
+        raise ValueError("universe.min_daily_nav_coverage_ratio 必须位于 (0, 1]。")
+    if config.universe.daily_nav_coverage_lookback_months <= 0:
+        raise ValueError("universe.daily_nav_coverage_lookback_months 必须大于 0。")
     if sum(config.ranking.factor_weights.values()) <= 0:
         raise ValueError("ranking.factor_weights 总和必须大于 0。")
     if not config.ranking.category_factors:
@@ -256,6 +276,12 @@ def _validate(config: AppConfig) -> None:
         raise ValueError("backtest.missing_return_policy 必须是 zero_fill_legacy 或 audit_only。")
     if not 0 <= config.backtest.missing_weight_warning_threshold <= 1:
         raise ValueError("backtest.missing_weight_warning_threshold 必须位于 [0, 1]。")
+    if config.backtest.redemption_settlement_lag_days < 0:
+        raise ValueError("backtest.redemption_settlement_lag_days 不能小于 0。")
+    if config.backtest.purchase_effective_lag_days < 0:
+        raise ValueError("backtest.purchase_effective_lag_days 不能小于 0。")
+    if config.backtest.cash_return_model not in {"zero"}:
+        raise ValueError("当前仅支持 cash_return_model=zero。")
 
 
 def _validate_month(field_name: str, value: str) -> None:
@@ -288,6 +314,17 @@ def to_serializable_dict(config: AppConfig) -> dict[str, Any]:
         "tushare": config.tushare.__dict__,
         "paths": {key: str(value) for key, value in config.paths.__dict__.items()},
     }
+
+
+def config_fingerprint(config: AppConfig) -> str:
+    """返回配置快照的稳定指纹，便于跨产物核对实验口径。"""
+    serialized = json.dumps(
+        to_serializable_dict(config),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
 
 
 def _load_benchmark_config(raw_benchmark: dict[str, Any]) -> BenchmarkConfig:

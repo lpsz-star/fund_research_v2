@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 
-from fund_research_v2.backtest.engine import run_backtest
+from fund_research_v2.backtest.engine import BacktestExecutionCache, run_backtest
 from fund_research_v2.common.config import AppConfig
 from fund_research_v2.common.contracts import DatasetSnapshot
 from fund_research_v2.common.date_utils import add_months
@@ -19,6 +19,8 @@ def build_robustness_analysis(
     dataset: DatasetSnapshot,
     candidate_score_rows: list[dict[str, object]],
     baseline_score_rows: list[dict[str, object]],
+    candidate_execution_cache: BacktestExecutionCache | None = None,
+    baseline_execution_cache: BacktestExecutionCache | None = None,
 ) -> dict[str, object]:
     """构建候选评分体系相对 baseline 的稳健性验证结果。"""
     candidate_backtest_rows, _ = run_backtest(
@@ -26,12 +28,18 @@ def build_robustness_analysis(
         score_rows=candidate_score_rows,
         nav_rows=dataset.fund_nav_monthly,
         benchmark_rows=dataset.benchmark_monthly,
+        trade_calendar_rows=dataset.trade_calendar,
+        nav_daily_rows=dataset.fund_nav_pit_daily,
+        prepared_execution_cache=candidate_execution_cache,
     )
     baseline_backtest_rows, _ = run_backtest(
         config=baseline_config,
         score_rows=baseline_score_rows,
         nav_rows=dataset.fund_nav_monthly,
         benchmark_rows=dataset.benchmark_monthly,
+        trade_calendar_rows=dataset.trade_calendar,
+        nav_daily_rows=dataset.fund_nav_pit_daily,
+        prepared_execution_cache=baseline_execution_cache,
     )
     candidate_monthly_portfolios = _build_monthly_portfolios(candidate_config, candidate_score_rows)
     baseline_monthly_portfolios = _build_monthly_portfolios(baseline_config, baseline_score_rows)
@@ -369,11 +377,16 @@ def default_baseline_config_path(config_path: Path, data_source: str) -> Path:
     """根据当前候选配置推断默认 baseline 配置路径。"""
     candidate = config_path.resolve()
     baseline_name = f"{data_source}.json"
-    baseline_path = candidate.parent / baseline_name
-    if baseline_path.exists() and baseline_path != candidate:
-        return baseline_path
-    fallback = candidate.parent / "default.json"
-    return fallback if fallback.exists() else candidate
+    for parent in candidate.parents:
+        if parent.name != "configs":
+            continue
+        baseline_path = parent / baseline_name
+        # 若当前传入的就是该数据源默认 baseline，本函数应返回它本身，而不是错误回退到 default.json(sample)。
+        if baseline_path.exists():
+            return baseline_path
+        fallback = parent / "default.json"
+        return fallback if fallback.exists() else candidate
+    return candidate
 
 
 def _mean(values: list[float]) -> float:

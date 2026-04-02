@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from fund_research_v2.backtest.engine import run_backtest
+from fund_research_v2.backtest.engine import BacktestExecutionCache, run_backtest
 from fund_research_v2.common.config import AppConfig
 from fund_research_v2.common.contracts import DatasetSnapshot
 from fund_research_v2.evaluation.metrics import summarize_backtest
@@ -15,6 +15,8 @@ def build_candidate_validation(
     dataset: DatasetSnapshot,
     candidate_score_rows: list[dict[str, object]],
     baseline_score_rows: list[dict[str, object]],
+    candidate_execution_cache: BacktestExecutionCache | None = None,
+    baseline_execution_cache: BacktestExecutionCache | None = None,
 ) -> dict[str, object]:
     """构建候选评分体系升级 baseline 前的最小补充验证结果。"""
     candidate_backtest_rows, _ = run_backtest(
@@ -22,12 +24,18 @@ def build_candidate_validation(
         score_rows=candidate_score_rows,
         nav_rows=dataset.fund_nav_monthly,
         benchmark_rows=dataset.benchmark_monthly,
+        trade_calendar_rows=dataset.trade_calendar,
+        nav_daily_rows=dataset.fund_nav_pit_daily,
+        prepared_execution_cache=candidate_execution_cache,
     )
     baseline_backtest_rows, _ = run_backtest(
         config=baseline_config,
         score_rows=baseline_score_rows,
         nav_rows=dataset.fund_nav_monthly,
         benchmark_rows=dataset.benchmark_monthly,
+        trade_calendar_rows=dataset.trade_calendar,
+        nav_daily_rows=dataset.fund_nav_pit_daily,
+        prepared_execution_cache=baseline_execution_cache,
     )
     style_phase_detail_rows = _build_style_phase_detail_rows(
         candidate_backtest_rows=candidate_backtest_rows,

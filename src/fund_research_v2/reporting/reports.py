@@ -111,9 +111,9 @@ def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], s
             "",
             "## Execution Convention",
             "",
-            "- 当前采用场外基金申购确认的月频代理口径。",
-            "- `signal_month` 月末形成选基信号，`execution_month` 月初视为申购提交代理日。",
-            "- `execution_effective_date_proxy` 当前与 `execution_request_date_proxy` 相同，表示从该月开始承担收益；这只是研究代理口径，不代表真实确认日。",
+            "- 当前采用场外基金研究代理口径：`decision_date=T` 卖出旧组合，`T+2` 资金到账后申购，`T+3` 新组合开始承担收益。",
+            "- `signal_month` 表示估值月，`execution_request_date_proxy` 对应 `decision_date`，`execution_effective_date_proxy` 对应 `buy_effective_date`。",
+            "- 这是研究层的可审计执行代理，不等同于真实场外基金确认明细。",
         ]
     )
     lines.extend(["", "## Monthly Results", ""])
@@ -121,6 +121,8 @@ def render_backtest_report(path: Path, backtest_rows: list[dict[str, object]], s
         lines.append(
             f"- {row['execution_month']}: request_proxy={row.get('execution_request_date_proxy', '')}, "
             f"effective_proxy={row.get('execution_effective_date_proxy', '')}, "
+            f"cash_available={row.get('cash_available_date', '')}, "
+            f"holding_end={row.get('holding_end_date', '')}, "
             f"net={row['portfolio_return_net']}, "
             f"benchmark={row['benchmark_return']}, turnover={row['turnover']}, "
             f"missing_weight={row.get('missing_weight', 0.0)}, missing_positions={row.get('missing_position_count', 0)}, "
@@ -137,6 +139,7 @@ def render_factor_evaluation_report(path: Path, evaluation: dict[str, object]) -
     distribution_rows = evaluation.get("distribution_rows", []) if isinstance(evaluation.get("distribution_rows"), list) else []
     bucket_rows = evaluation.get("bucket_rows", []) if isinstance(evaluation.get("bucket_rows"), list) else []
     correlation_rows = evaluation.get("correlation_rows", []) if isinstance(evaluation.get("correlation_rows"), list) else []
+    scorecard_rows = evaluation.get("scorecard_rows", []) if isinstance(evaluation.get("scorecard_rows"), list) else []
     high_correlation_rows = [row for row in correlation_rows if int(row.get("high_correlation_flag", 0)) == 1]
     lines = [
         "# Factor Evaluation Report",
@@ -146,6 +149,14 @@ def render_factor_evaluation_report(path: Path, evaluation: dict[str, object]) -
     ]
     for key, value in summary.items():
         lines.append(f"- {key}: {value}")
+    lines.extend(["", "## Research Scorecard", ""])
+    for row in scorecard_rows:
+        lines.append(
+            f"- {row['factor_name']}: role={row['research_role']} conclusion={row['admission_conclusion']} "
+            f"semantic={row['semantic_rationality']} time_boundary={row['time_boundary_cleanliness']} "
+            f"ranking={row['ranking_ability']} stability={row['time_varying_stability']} "
+            f"coverage={row['coverage_quality']} style={row['style_explanation']}"
+        )
     lines.extend(["", "## Factor Diagnostics", ""])
     for row in factor_rows:
         lines.append(

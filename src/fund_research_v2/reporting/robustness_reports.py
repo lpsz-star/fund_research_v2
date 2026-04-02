@@ -10,8 +10,12 @@ def render_robustness_report(path: Path, analysis: dict[str, object]) -> None:
     contribution_rows = analysis.get("month_contribution_rows", []) if isinstance(analysis.get("month_contribution_rows"), list) else []
     portfolio_behavior_rows = analysis.get("portfolio_behavior_rows", []) if isinstance(analysis.get("portfolio_behavior_rows"), list) else []
     factor_regime_rows = analysis.get("factor_regime_rows", []) if isinstance(analysis.get("factor_regime_rows"), list) else []
-    lines = ["# Robustness Report", "", "## Executive Summary", ""]
+    lines = ["# Robustness Report", ""]
+    lines.extend(_render_config_identity(summary))
+    lines.extend(["## Executive Summary", ""])
     for key, value in summary.items():
+        if key in {"candidate_config", "baseline_config"}:
+            continue
         lines.append(f"- {key}: {value}")
     lines.extend(["", "## Time Slice Comparison", ""])
     for row in time_slice_rows[:40]:
@@ -42,3 +46,19 @@ def render_robustness_report(path: Path, analysis: dict[str, object]) -> None:
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _render_config_identity(summary: dict[str, object]) -> list[str]:
+    """优先把候选与 baseline 的配置身份写在报告开头，便于评审时直接核对。"""
+    lines = ["## Config Identity", ""]
+    for label, key in [("Candidate", "candidate_config"), ("Baseline", "baseline_config")]:
+        value = summary.get(key, {})
+        if isinstance(value, dict):
+            lines.append(
+                f"- {label}: path={value.get('config_path', '')} "
+                f"fingerprint={value.get('config_fingerprint', '')} data_source={value.get('data_source', '')}"
+            )
+        else:
+            lines.append(f"- {label}: {value}")
+    lines.extend([""])
+    return lines

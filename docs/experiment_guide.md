@@ -32,6 +32,7 @@
 ```bash
 make run-sample
 make run-tushare
+make run-tushare-candidate
 ```
 
 当真实抓数上一次只失败了少量份额接口时，允许先走失败增量补抓：
@@ -43,12 +44,12 @@ make run-tushare
 
 这一步的目的不是直接生成完整 clean/result 产物，而是先把上次失败的单接口缓存补齐，避免下一次全量实验再次从零联网重抓。
 
-对应 CLI：
+对应最常用 CLI：
 
 ```bash
 PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/default.json
 PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare.json
-PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare_scoring_v2.json
+PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/candidates/tushare_scoring_v5_candidate.json
 ```
 
 当前标准实验对比命令：
@@ -59,13 +60,13 @@ make compare-tushare
 ```
 
 它默认比较同一数据源最近两次完整实验记录，并输出标准差异报告，而不是要求人工逐项翻历史文件。
-当 `run-experiment` 成功写入新的实验记录后，系统现在也会自动刷新一次当前数据源的 `comparison_report.md` 与对应 diff 产物，
+当 `run-experiment` 成功写入新的实验记录后，系统现在也会自动刷新一次当前数据源的 `comparison/` 目录与对应 diff 产物，
 避免实验登记已经前进，但对比报告仍停在旧一轮。
 
 当前标准稳健性验证命令：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/tushare_scoring_v2.json
+make analyze-tushare-candidate
 ```
 
 这条命令不会修改策略、评分、回测逻辑，只会基于当前候选配置和默认 baseline 重做分析并输出稳健性诊断产物。
@@ -73,8 +74,22 @@ PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/t
 当前标准候选 baseline 补证命令：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config configs/tushare_scoring_v2.json
+make validate-tushare-candidate
 ```
+
+如果你要先核查一轮“字段是不是历史可得、能不能进入正式因子研究”，建议执行：
+
+```bash
+PYTHONPATH=src python3 -m fund_research_v2 audit-field-availability --config configs/tushare.json
+```
+
+优先查看：
+
+- [`field_availability_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/factor_research/field_availability_report.md)
+- [`field_availability_audit.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/factor_research/field_availability_audit.csv)
+- [`incremental_factor_research_summary.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/factor_research/incremental_factor_research_summary.csv)
+- [`incremental_factor_research_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/factor_research/incremental_factor_research_report.md)
+- [`factor_research_framework.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_research_framework.md)
 
 这条命令会把 A/B 两项补证产物写到独立目录：
 
@@ -86,7 +101,7 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 
 - [robustness_analysis.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
 - [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
-- [v2_baseline_review_2026-03-24.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-24.md)
+- [v2_baseline_review_2026-03-25.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/v2_baseline_review_2026-03-25.md)
 - [candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
 
 ## 3. 一次完整实验会产出什么
@@ -102,33 +117,35 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 ### 3.1 清洗层
 
 - [`fund_entity_master.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_entity_master.csv)
-- [`fund_share_class_map.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_share_class_map.csv)
-- [`fund_nav_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_nav_monthly.csv)
-- [`benchmark_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/benchmark_monthly.csv)
-- [`manager_assignment_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/manager_assignment_monthly.csv)
-- [`fund_universe_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/clean/fund_universe_monthly.csv)
+- [`fund_share_class_map.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_share_class_map.csv)
+- [`fund_nav_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_nav_monthly.csv)
+- [`benchmark_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/benchmark_monthly.csv)
+- [`manager_assignment_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/manager_assignment_monthly.csv)
+- [`fund_universe_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_universe_monthly.csv)
+- [`fund_nav_daily_coverage_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/fund_nav_daily_coverage_monthly.csv)
 - [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/dataset_snapshot.json)
 
 ### 3.2 特征与结果层
 
 - [`fund_feature_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/feature/fund_feature_monthly.csv)
 - [`fund_score_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/fund_score_monthly.csv)
-- [`portfolio_target_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_target_monthly.csv)
-- [`portfolio_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/portfolio_snapshot.json)
-- [`backtest_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_monthly.csv)
-- [`backtest_position_audit.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_position_audit.csv)
-- [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/result/backtest_summary.json)
-- [`factor_evaluation.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/factor_evaluation.json)
-- [`factor_evaluation.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/factor_evaluation.csv)
+- [`portfolio_target_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/portfolio_target_monthly.csv)
+- [`portfolio_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/portfolio_snapshot.json)
+- [`backtest_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/backtest_monthly.csv)
+- [`backtest_position_audit.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/backtest_position_audit.csv)
+- [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/backtest_summary.json)
+- [`factor_evaluation.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_evaluation.json)
+- [`factor_evaluation.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_evaluation.csv)
+- [`factor_research_scorecard.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_research_scorecard.csv)
 - [`type_baseline_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_snapshot.json)
 
 ### 3.3 报告层
 
 - [`portfolio_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/portfolio_report.md)
-- [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/experiment_report.md)
-- [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/backtest_report.md)
-- [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/reports/universe_audit_report.md)
-- [`factor_evaluation_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/factor_evaluation_report.md)
+- [`experiment_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/experiment_report.md)
+- [`backtest_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/backtest_report.md)
+- [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
+- [`factor_evaluation_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_evaluation_report.md)
 
 ### 3.4 实验追踪层
 
@@ -136,20 +153,20 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 
 ### 3.5 实验对比层
 
-- [`comparison_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/comparison_summary.json)
-- [`backtest_summary_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/backtest_summary_diff.json)
-- [`type_baseline_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_diff.json)
-- [`portfolio_diff.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/portfolio_diff.csv)
-- [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/comparison_report.md)
+- [`comparison_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/comparison/comparison_summary.json)
+- [`backtest_summary_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/comparison/backtest_summary_diff.json)
+- [`type_baseline_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/comparison/type_baseline_diff.json)
+- [`portfolio_diff.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/comparison/portfolio_diff.csv)
+- [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/comparison/comparison_report.md)
 
 ### 3.6 稳健性验证层
 
-- [`robustness_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_summary.json)
-- [`robustness_time_slices.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_time_slices.csv)
-- [`robustness_month_contribution.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_month_contribution.csv)
-- [`robustness_portfolio_behavior.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_portfolio_behavior.csv)
-- [`robustness_factor_regime.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_factor_regime.csv)
-- [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/robustness_report.md)
+- [`robustness_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_summary.json)
+- [`robustness_time_slices.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_time_slices.csv)
+- [`robustness_month_contribution.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_month_contribution.csv)
+- [`robustness_portfolio_behavior.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_portfolio_behavior.csv)
+- [`robustness_factor_regime.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_factor_regime.csv)
+- [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_report.md)
 - [`robustness_analysis.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/robustness_analysis.md)
 
 ### 3.7 候选基线补证层
@@ -211,17 +228,17 @@ make run-sample
 make run-tushare
 ```
 
-如果你在做评分体系优化，建议不要直接覆盖默认 baseline，而是新增一份配置单独运行。
+如果你在做评分体系优化，建议不要直接覆盖默认 baseline，而是用当前正式候选单独运行。
 
-当前仓库里已经提供了一份候选评分配置：
+当前仓库里正式保留的候选评分配置是：
 
-- [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+- [`tushare_scoring_v5_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_candidate.json)
 
 它对应的运行方式是：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare_scoring_v2.json
-PYTHONPATH=src python3 -m fund_research_v2 compare-experiments --config configs/tushare_scoring_v2.json
+make run-tushare-candidate
+PYTHONPATH=src python3 -m fund_research_v2 compare-experiments --config configs/candidates/tushare_scoring_v5_candidate.json
 ```
 
 如果上一次抓数日志显示失败集中在少量 `ts_code`，建议先执行：
@@ -251,9 +268,9 @@ make compare-tushare
 
 优先查看：
 
-- [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/comparison_report.md)
-- [`portfolio_diff.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/portfolio_diff.csv)
-- [`backtest_summary_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/backtest_summary_diff.json)
+- [`comparison_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/comparison/comparison_report.md)
+- [`portfolio_diff.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/comparison/portfolio_diff.csv)
+- [`backtest_summary_diff.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/comparison/backtest_summary_diff.json)
 
 阅读 `comparison_report.md` 时还需要注意：
 
@@ -261,29 +278,29 @@ make compare-tushare
 - 报告开头的 `previous/current` 和 `*_generated_at` 才是实际被比较的实验对象
 - 若你需要讨论某个特定候选配置是否升级 baseline，不应只凭文件名判断，必须先核对比较对象是否就是那一对实验
 
-如果比较的是默认评分和 `tushare_scoring_v2`：
+如果比较的是默认评分和当前正式候选：
 
 - 应重点关注收益改善是否伴随波动和回撤恶化
 - 不应只看累计收益，还要同时看组合是否发生了大幅换仓
 - 若提升过大，优先怀疑是否对当前样本更敏感，而不是直接认定新体系必然更优
 
-若你要进一步确认 `tushare_scoring_v2` 的提升是否稳健，建议再执行：
+若你要进一步确认当前正式候选的提升是否稳健，建议再执行：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/tushare_scoring_v2.json
+make analyze-tushare-candidate
 ```
 
 优先查看：
 
-- [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/reports/robustness_report.md)
-- [`robustness_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_summary.json)
-- [`robustness_time_slices.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_time_slices.csv)
-- [`robustness_month_contribution.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/robustness_month_contribution.csv)
+- [`robustness_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_report.md)
+- [`robustness_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_summary.json)
+- [`robustness_time_slices.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_time_slices.csv)
+- [`robustness_month_contribution.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/robustness/robustness_month_contribution.csv)
 
 如果你要继续回答“能不能升 baseline”，建议再执行：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config configs/tushare_scoring_v2.json
+make validate-tushare-candidate
 ```
 
 优先查看：
@@ -299,8 +316,8 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 1. [`dataset_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/clean/dataset_snapshot.json)
    - 先确认数据源、样本范围、主回测 benchmark 和规模口径
    - benchmark 优先看 `benchmark_name`、`benchmark_ts_code` 与 `benchmark_default_key`，不要只看 `primary_type_map`
-2. [`time_boundary_audit.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/time_boundary_audit.md)
-   - 先确认哪些字段能解释历史月份，哪些只是最新快照
+2. [`data_contracts.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md)
+   - 先确认哪些字段能解释历史月份，哪些只是最新快照，以及 `available_date` 的使用边界
 3. [`universe_audit_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/reports/universe_audit_report.md)
    - 确认基金池是如何收缩的
 4. [`type_baseline_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_snapshot.json)
@@ -316,6 +333,7 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 
 ## 6.1 读报告时必须注意的时点边界
 
+- `data_contracts.md` 中的“时间边界总则”应视为阅读所有实验结果前的前置约束。
 - `fund_entity_master` 主要解释当前实体画像，不直接解释历史月份。
 - 历史月份的规模判断，要看 `fund_universe_monthly.visible_assets_cny_mn`。
 - 历史月份的经理解释，要看 `fund_feature_monthly.manager_name` 与 `manager_tenure_months`。
@@ -411,13 +429,3 @@ PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config 
 - `unknown`
 
 这会降低代码版本可追踪性。
-
-## 10. 后续建议
-
-建议后续补强：
-
-1. baseline 命名与版本冻结机制
-2. 实验对比脚本
-3. 配置差异自动摘要
-4. 数据快照版本号
-5. 实验失败日志与自动归档

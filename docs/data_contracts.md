@@ -10,7 +10,55 @@
 - 份额类与基金实体分离
 - 输出结果不反向驱动源码逻辑
 
-### 1.1 tushare 基金场景常用接口在线文档链接：
+### 1.1 时间边界总则
+
+当前所有数据表在研究链路里都必须先区分两类语义：
+
+- 历史月份解释字段
+  - 用来回答“在当时那个 `month`，系统真实能看到什么”
+- 最新快照字段
+  - 用来回答“这只基金现在长什么样”
+
+默认要求是：
+
+- 任何进入基金池、特征、评分和回测信号的字段，都必须能说明自己的 `month` 与 `available_date`
+- 正式最新研究月统一取 `as_of_date` 之前最后一个完整结束的自然月
+- raw 快照中即使已经出现当月部分记录，也不能直接把该月视为正式最新信号月
+- `latest_month` 与 raw 数据中的最大月份允许不相等
+
+当前主线里，以下字段更适合解释历史月份：
+
+- `fund_universe_monthly.visible_assets_cny_mn`
+- `fund_universe_monthly.visible_history_months`
+- `fund_universe_monthly.fund_age_months`
+- `fund_universe_monthly.nav_available_date`
+- `fund_feature_monthly.manager_name`
+- `fund_feature_monthly.manager_tenure_months`
+- `fund_feature_monthly.ret_3m`
+- `fund_feature_monthly.ret_6m`
+- `fund_feature_monthly.ret_12m`
+- `fund_feature_monthly.excess_ret_12m`
+- `fund_feature_monthly.vol_12m`
+- `fund_feature_monthly.downside_vol_12m`
+- `fund_feature_monthly.max_drawdown_12m`
+- `fund_feature_monthly.asset_stability_12m`
+- `fund_score_monthly` 中全部评分字段
+
+以下字段更适合解释最新快照，不应用来直接回头解释历史月份：
+
+- `fund_entity_master.manager_name`
+- `fund_entity_master.manager_start_month`
+- `fund_entity_master.latest_assets_cny_mn`
+- `fund_entity_master.status`
+- `fund_entity_master.representative_share_class_id`
+
+后续新增字段时，默认先回答三个问题：
+
+- 它解释的是历史月份，还是当前快照
+- 它的可见时点是什么
+- 它是否需要单独保留 `available_date`
+
+### 1.2 tushare 基金场景常用接口在线文档链接：
 基金列表：https://tushare.pro/document/2?doc_id=19
 基金管理人：https://tushare.pro/document/2?doc_id=118
 基金经理：https://tushare.pro/document/2?doc_id=208
@@ -32,12 +80,16 @@
 - `fund_entity_master.csv`
 - `fund_share_class_map.csv`
 - `fund_nav_monthly.csv`
+- `fund_nav_pit_daily.csv`
+- `fund_nav_daily_coverage_monthly.csv`
+- `trade_calendar.csv`
 - `benchmark_monthly.csv`
 - `manager_assignment_monthly.csv`
 - `fund_type_audit.csv`
 - `fund_liquidity_audit.csv`
 - `dropped_entities.csv`
 - `dataset_snapshot.json`
+- `dataset_snapshot.pkl`
 
 ### 2.2 `outputs/<data_source>/clean`
 
@@ -73,6 +125,74 @@
 实验追踪层：
 
 - `experiment_registry.jsonl`
+
+### 2.6 `outputs/<data_source>/factor_evaluation`
+
+因子评估诊断层。
+
+当前包含：
+
+- `factor_evaluation.json`
+- `factor_evaluation.csv`
+- `factor_research_scorecard.csv`
+- `factor_distribution.csv`
+- `factor_bucket_performance.csv`
+- `factor_correlation.csv`
+- `factor_evaluation_report.md`
+
+### 2.7 `outputs/<data_source>/robustness`
+
+稳健性分析层。
+
+当前包含：
+
+- `robustness_summary.json`
+- `robustness_time_slices.csv`
+- `robustness_month_contribution.csv`
+- `robustness_portfolio_behavior.csv`
+- `robustness_factor_regime.csv`
+- `robustness_report.md`
+
+### 2.8 `outputs/<data_source>/factor_research`
+
+因子研究框架产物层。
+
+当前包含：
+
+- `field_availability_summary.json`
+- `field_availability_audit.csv`
+- `field_availability_report.md`
+- `incremental_factor_research_summary.csv`
+- `incremental_factor_research_report.md`
+
+### 2.9 `outputs/<data_source>/candidate_validation`
+
+候选 baseline 补证层。
+
+当前包含：
+
+- `candidate_validation_summary.json`
+- `candidate_validation_report.md`
+- `style_phase_summary.csv`
+- `style_phase_detail.csv`
+- `style_phase_rolling_windows.csv`
+- `style_phase_stability_summary.json`
+- `style_phase_report.md`
+- `excess_attribution_summary.json`
+- `excess_attribution_monthly.csv`
+- `excess_attribution_report.md`
+
+### 2.10 `outputs/<data_source>/comparison`
+
+最近两次实验的差异产物层。
+
+当前包含：
+
+- `comparison_summary.json`
+- `backtest_summary_diff.json`
+- `type_baseline_diff.json`
+- `portfolio_diff.csv`
+- `comparison_report.md`
 
 ## 3. 主要表定义
 
@@ -147,8 +267,9 @@
 
 - `signal_date` 由 `month` 所代表的月末近似表达
 - 正式研究只把 `as_of_date` 之前最后一个完整结束的自然月视为“最新有效 `month`”
-- `available_date` 当前与 `nav_date` 相同
-- 后续如引入披露滞后，应优先调整 `available_date`
+- `available_date` 表示研究链路真实允许使用该净值记录的日期
+- 当前已按净值披露滞后生成，不再假设与 `nav_date` 恒相同
+- 基金池、特征与评分都必须满足 `available_date <= decision_date`
 
 ### 3.4 `benchmark_monthly`
 
@@ -174,7 +295,33 @@
 - 回测主口径固定使用 `benchmark.default_key` 对应的市场 benchmark，不再按组合持仓动态混合 benchmark。
 - 若存在 `available_date`，则特征层构造 `excess_ret_12m` 时只能使用信号月月末前已可见的 benchmark 月收益。
 
-### 3.5 `manager_assignment_monthly`
+### 3.5 `fund_nav_daily_coverage_monthly`
+
+逐实体逐月的历史日频净值覆盖率月表。
+
+关键字段：
+
+- `entity_id`
+- `month`
+- `decision_date`
+  该 `month` 对应的下月第 1 个交易日。
+- `lookback_months`
+  当前覆盖率窗口长度。
+- `trailing_daily_nav_coverage_ratio`
+  只使用 `decision_date` 前已可见的历史 PIT 日频净值，计算得到的回看覆盖率。
+- `trailing_daily_nav_coverage_months`
+  回看窗口内实际参与覆盖率平均的月份数。
+
+主键：
+
+- `entity_id + month + lookback_months`
+
+说明：
+
+- 该表的金融语义与基金池原先的在线计算一致，只是把计算前移到 raw 层缓存。
+- 若研究配置切换了不同的覆盖率窗口，而 raw 层月表窗口不匹配，基金池会自动回退到旧的在线扫描逻辑。
+
+### 3.6 `manager_assignment_monthly`
 
 月频经理映射表。
 
@@ -196,7 +343,7 @@
 - 若同月存在多名在任经理，当前默认取 `begin_date` 最近的一位，目的是让任期口径更接近“当月主要管理责任人”。
 - 若某月没有严格匹配到在任区间，则允许回退到“该月之前最近开始任职”的经理，避免历史接口缺口把任期字段全部打成缺失。
 
-### 3.6 `fund_universe_monthly`
+### 3.7 `fund_universe_monthly`
 
 每月基金池快照。
 
