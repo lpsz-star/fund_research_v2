@@ -7,7 +7,7 @@ from time import perf_counter
 import sys
 
 from fund_research_v2.backtest.engine import prepare_backtest_execution_cache, run_backtest
-from fund_research_v2.common.config import AppConfig, load_config, scope_artifact_dir, to_serializable_dict
+from fund_research_v2.common.config import AppConfig, config_fingerprint, load_config, scope_artifact_dir, to_serializable_dict
 from fund_research_v2.common.date_utils import current_timestamp, latest_completed_month
 from fund_research_v2.common.io_utils import append_jsonl, ensure_directories, write_csv, write_json
 from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, load_dataset, warm_failed_api_cache
@@ -92,6 +92,14 @@ def analyze_robustness_command(config_path: Path) -> None:
         candidate_execution_cache=candidate_bundle.get("prepared_execution_cache"),
         baseline_execution_cache=baseline_bundle.get("prepared_execution_cache"),
     )
+    _attach_config_identity(
+        analysis.get("summary", {}),
+        candidate_config=candidate_bundle["config"],
+        baseline_config=baseline_bundle["config"],
+        candidate_config_path=config_path,
+        baseline_config_path=baseline_config_path,
+        project_root=project_root,
+    )
     write_json(robustness_output_dir / "robustness_summary.json", analysis.get("summary", {}))
     write_csv(robustness_output_dir / "robustness_time_slices.csv", analysis.get("time_slice_rows", []))
     write_csv(robustness_output_dir / "robustness_month_contribution.csv", analysis.get("month_contribution_rows", []))
@@ -118,6 +126,14 @@ def validate_baseline_candidate_command(config_path: Path) -> None:
         baseline_score_rows=baseline_bundle["score_rows"],
         candidate_execution_cache=candidate_bundle.get("prepared_execution_cache"),
         baseline_execution_cache=baseline_bundle.get("prepared_execution_cache"),
+    )
+    _attach_config_identity(
+        validation.get("summary", {}),
+        candidate_config=candidate_bundle["config"],
+        baseline_config=baseline_bundle["config"],
+        candidate_config_path=config_path,
+        baseline_config_path=baseline_config_path,
+        project_root=project_root,
     )
     write_json(validation_dir / "candidate_validation_summary.json", validation.get("summary", {}))
     write_csv(validation_dir / "style_phase_summary.csv", validation.get("style_phase_summary_rows", []))
@@ -376,6 +392,7 @@ def write_full_outputs(
         factor_evaluation = evaluate_factors(feature_rows, dataset.fund_nav_monthly)
         write_json(factor_eval_dir / "factor_evaluation.json", factor_evaluation)
         write_csv(factor_eval_dir / "factor_evaluation.csv", factor_evaluation.get("factor_rows", []))
+        write_csv(factor_eval_dir / "factor_research_scorecard.csv", factor_evaluation.get("scorecard_rows", []))
         write_csv(factor_eval_dir / "factor_distribution.csv", factor_evaluation.get("distribution_rows", []))
         write_csv(factor_eval_dir / "factor_bucket_performance.csv", factor_evaluation.get("bucket_rows", []))
         write_csv(factor_eval_dir / "factor_correlation.csv", factor_evaluation.get("correlation_rows", []))
@@ -558,9 +575,10 @@ def build_type_baseline_snapshot(
 def resolve_project_root(config_path: Path) -> Path:
     """根据配置文件路径推断项目根目录。"""
     resolved = config_path.resolve()
-    # 这里按 configs 目录反推项目根目录，是为了让命令既能在仓库根目录调用，也能直接传配置文件绝对路径调用。
-    if resolved.parent.name == "configs":
-        return resolved.parent.parent
+    # 这里按祖先中的 configs 目录反推项目根目录，是为了支持 configs/candidates/ 这类分层配置目录。
+    for parent in resolved.parents:
+        if parent.name == "configs":
+            return parent.parent
     return resolved.parent
 
 
@@ -617,6 +635,34 @@ def git_commit_hash(project_root: Path) -> str:
         output = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=project_root, stderr=subprocess.DEVNULL)
     except Exception:
         return "unknown"
+
+
+def _attach_config_identity(
+    summary: dict[str, object],
+    *,
+    candidate_config: AppConfig,
+    baseline_config: AppConfig,
+    candidate_config_path: Path,
+    baseline_config_path: Path,
+    project_root: Path,
+) -> None:
+    """把配置来源与指纹写入摘要，避免只看到 data_source 而无法定位具体配置。"""
+    summary["candidate_config"] = _config_identity(candidate_config, candidate_config_path, project_root)
+    summary["baseline_config"] = _config_identity(baseline_config, baseline_config_path, project_root)
+
+
+def _config_identity(config: AppConfig, config_path: Path, project_root: Path) -> dict[str, object]:
+    """生成可写入 JSON 的配置身份信息。"""
+    resolved_path = config_path.resolve()
+    try:
+        display_path = str(resolved_path.relative_to(project_root))
+    except ValueError:
+        display_path = str(resolved_path)
+    return {
+        "data_source": str(config.data_source),
+        "config_path": display_path,
+        "config_fingerprint": config_fingerprint(config),
+    }
     return output.decode("utf-8").strip()
 
 

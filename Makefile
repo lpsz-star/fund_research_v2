@@ -2,6 +2,7 @@ PYTHON := PYTHONPATH=src python3
 APP := -m fund_research_v2
 SAMPLE_CONFIG := configs/default.json
 TUSHARE_CONFIG := configs/tushare.json
+TUSHARE_CANDIDATE_CONFIG := configs/candidates/tushare_scoring_v5_candidate.json
 
 .PHONY: help
 help:
@@ -13,7 +14,11 @@ help:
 	"  make fetch-failed-tushare 仅重抓上次失败的 tushare 份额接口缓存" \
 	"  make compare-sample       对比 sample 最近两次完整实验" \
 	"  make compare-tushare      对比 tushare 最近两次完整实验" \
-	"  make validate-tushare-v2  对 tushare_scoring_v2 执行 A/B 候选基线验证" \
+	"  make run-tushare-candidate 运行当前 tushare 正式候选完整实验" \
+	"  make run-tushare-candidate-fast 运行当前 tushare 正式候选快速实验" \
+	"  make analyze-tushare-candidate 运行当前 tushare 正式候选稳健性分析" \
+	"  make validate-tushare-candidate 对当前 tushare 正式候选执行 A/B 候选基线验证" \
+	"  make validate-tushare-v2  兼容旧入口，等价于 validate-tushare-candidate" \
 	"  make universe-sample      构建 sample 基金池" \
 	"  make universe-tushare     构建 tushare 基金池" \
 	"  make features-sample      计算 sample 特征" \
@@ -56,9 +61,20 @@ compare-sample:
 compare-tushare:
 	$(PYTHON) $(APP) compare-experiments --config $(TUSHARE_CONFIG)
 
-.PHONY: validate-tushare-v2
-validate-tushare-v2:
-	$(PYTHON) $(APP) validate-baseline-candidate --config configs/tushare_scoring_v2.json
+.PHONY: run-tushare-candidate run-tushare-candidate-fast analyze-tushare-candidate validate-tushare-candidate validate-tushare-v2
+run-tushare-candidate:
+	$(PYTHON) $(APP) run-experiment --config $(TUSHARE_CANDIDATE_CONFIG)
+
+run-tushare-candidate-fast:
+	$(PYTHON) $(APP) run-experiment --config $(TUSHARE_CANDIDATE_CONFIG) --fast
+
+analyze-tushare-candidate:
+	$(PYTHON) $(APP) analyze-robustness --config $(TUSHARE_CANDIDATE_CONFIG)
+
+validate-tushare-candidate:
+	$(PYTHON) $(APP) validate-baseline-candidate --config $(TUSHARE_CANDIDATE_CONFIG)
+
+validate-tushare-v2: validate-tushare-candidate
 
 .PHONY: universe-sample
 universe-sample:

@@ -306,8 +306,8 @@
 - 发现时间：2026-03-26
 - 影响模块：
   - [`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
-  - [`configs/tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
-  - [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)
+  - [`configs/archive/factor_research/tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/archive/factor_research/tushare_scoring_v2.json)
+  - [`configs/archive/factor_research/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/archive/factor_research/tushare_scoring_v2_lite.json)
   - [`engine.py`](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/backtest/engine.py)
   - 报告与协作文档
 - 现象：

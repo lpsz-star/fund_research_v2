@@ -31,7 +31,7 @@
 命令入口：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/tushare_scoring_v2.json
+PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/archive/factor_research/tushare_scoring_v4.json
 ```
 
 当前工作流会先加载：
@@ -48,7 +48,7 @@ baseline 的选择规则由 [`default_baseline_config_path()`](/Users/liupeng/.c
 
 这意味着：
 
-- `configs/tushare_scoring_v2.json` 默认会与 `configs/tushare.json` 比
+- `configs/archive/factor_research/tushare_scoring_v2.json` 默认会与 `configs/tushare.json` 比
 - `configs/sample_scoring_v2.json` 默认会与 `configs/sample.json` 比
 
 ## 3. 整体逻辑

@@ -134,6 +134,7 @@
 
 - `factor_evaluation.json`
 - `factor_evaluation.csv`
+- `factor_research_scorecard.csv`
 - `factor_distribution.csv`
 - `factor_bucket_performance.csv`
 - `factor_correlation.csv`
@@ -161,6 +162,8 @@
 - `field_availability_summary.json`
 - `field_availability_audit.csv`
 - `field_availability_report.md`
+- `incremental_factor_research_summary.csv`
+- `incremental_factor_research_report.md`
 
 ### 2.9 `outputs/<data_source>/candidate_validation`
 

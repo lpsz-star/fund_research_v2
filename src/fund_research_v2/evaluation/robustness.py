@@ -377,12 +377,16 @@ def default_baseline_config_path(config_path: Path, data_source: str) -> Path:
     """根据当前候选配置推断默认 baseline 配置路径。"""
     candidate = config_path.resolve()
     baseline_name = f"{data_source}.json"
-    baseline_path = candidate.parent / baseline_name
-    # 若当前传入的就是该数据源默认 baseline，本函数应返回它本身，而不是错误回退到 default.json(sample)。
-    if baseline_path.exists():
-        return baseline_path
-    fallback = candidate.parent / "default.json"
-    return fallback if fallback.exists() else candidate
+    for parent in candidate.parents:
+        if parent.name != "configs":
+            continue
+        baseline_path = parent / baseline_name
+        # 若当前传入的就是该数据源默认 baseline，本函数应返回它本身，而不是错误回退到 default.json(sample)。
+        if baseline_path.exists():
+            return baseline_path
+        fallback = parent / "default.json"
+        return fallback if fallback.exists() else candidate
+    return candidate
 
 
 def _mean(values: list[float]) -> float:

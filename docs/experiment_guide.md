@@ -32,6 +32,7 @@
 ```bash
 make run-sample
 make run-tushare
+make run-tushare-candidate
 ```
 
 当真实抓数上一次只失败了少量份额接口时，允许先走失败增量补抓：
@@ -43,12 +44,12 @@ make run-tushare
 
 这一步的目的不是直接生成完整 clean/result 产物，而是先把上次失败的单接口缓存补齐，避免下一次全量实验再次从零联网重抓。
 
-对应 CLI：
+对应最常用 CLI：
 
 ```bash
 PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/default.json
 PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare.json
-PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare_scoring_v2.json
+PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/candidates/tushare_scoring_v5_candidate.json
 ```
 
 当前标准实验对比命令：
@@ -65,7 +66,7 @@ make compare-tushare
 当前标准稳健性验证命令：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/tushare_scoring_v2.json
+make analyze-tushare-candidate
 ```
 
 这条命令不会修改策略、评分、回测逻辑，只会基于当前候选配置和默认 baseline 重做分析并输出稳健性诊断产物。
@@ -73,7 +74,7 @@ PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/t
 当前标准候选 baseline 补证命令：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config configs/tushare_scoring_v2.json
+make validate-tushare-candidate
 ```
 
 如果你要先核查一轮“字段是不是历史可得、能不能进入正式因子研究”，建议执行：
@@ -86,6 +87,8 @@ PYTHONPATH=src python3 -m fund_research_v2 audit-field-availability --config con
 
 - [`field_availability_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/factor_research/field_availability_report.md)
 - [`field_availability_audit.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/factor_research/field_availability_audit.csv)
+- [`incremental_factor_research_summary.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/factor_research/incremental_factor_research_summary.csv)
+- [`incremental_factor_research_report.md`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/factor_research/incremental_factor_research_report.md)
 - [`factor_research_framework.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/factor_research_framework.md)
 
 这条命令会把 A/B 两项补证产物写到独立目录：
@@ -133,6 +136,7 @@ PYTHONPATH=src python3 -m fund_research_v2 audit-field-availability --config con
 - [`backtest_summary.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/backtest_summary.json)
 - [`factor_evaluation.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_evaluation.json)
 - [`factor_evaluation.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_evaluation.csv)
+- [`factor_research_scorecard.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_research_scorecard.csv)
 - [`type_baseline_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_snapshot.json)
 
 ### 3.3 报告层
@@ -224,17 +228,17 @@ make run-sample
 make run-tushare
 ```
 
-如果你在做评分体系优化，建议不要直接覆盖默认 baseline，而是新增一份配置单独运行。
+如果你在做评分体系优化，建议不要直接覆盖默认 baseline，而是用当前正式候选单独运行。
 
-当前仓库里已经提供了一份候选评分配置：
+当前仓库里正式保留的候选评分配置是：
 
-- [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+- [`tushare_scoring_v5_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_candidate.json)
 
 它对应的运行方式是：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare_scoring_v2.json
-PYTHONPATH=src python3 -m fund_research_v2 compare-experiments --config configs/tushare_scoring_v2.json
+make run-tushare-candidate
+PYTHONPATH=src python3 -m fund_research_v2 compare-experiments --config configs/candidates/tushare_scoring_v5_candidate.json
 ```
 
 如果上一次抓数日志显示失败集中在少量 `ts_code`，建议先执行：
@@ -274,16 +278,16 @@ make compare-tushare
 - 报告开头的 `previous/current` 和 `*_generated_at` 才是实际被比较的实验对象
 - 若你需要讨论某个特定候选配置是否升级 baseline，不应只凭文件名判断，必须先核对比较对象是否就是那一对实验
 
-如果比较的是默认评分和 `tushare_scoring_v2`：
+如果比较的是默认评分和当前正式候选：
 
 - 应重点关注收益改善是否伴随波动和回撤恶化
 - 不应只看累计收益，还要同时看组合是否发生了大幅换仓
 - 若提升过大，优先怀疑是否对当前样本更敏感，而不是直接认定新体系必然更优
 
-若你要进一步确认 `tushare_scoring_v2` 的提升是否稳健，建议再执行：
+若你要进一步确认当前正式候选的提升是否稳健，建议再执行：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/tushare_scoring_v2.json
+make analyze-tushare-candidate
 ```
 
 优先查看：
@@ -296,7 +300,7 @@ PYTHONPATH=src python3 -m fund_research_v2 analyze-robustness --config configs/t
 如果你要继续回答“能不能升 baseline”，建议再执行：
 
 ```bash
-PYTHONPATH=src python3 -m fund_research_v2 validate-baseline-candidate --config configs/tushare_scoring_v2.json
+make validate-tushare-candidate
 ```
 
 优先查看：

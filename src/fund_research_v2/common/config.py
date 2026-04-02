@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -313,6 +314,17 @@ def to_serializable_dict(config: AppConfig) -> dict[str, Any]:
         "tushare": config.tushare.__dict__,
         "paths": {key: str(value) for key, value in config.paths.__dict__.items()},
     }
+
+
+def config_fingerprint(config: AppConfig) -> str:
+    """返回配置快照的稳定指纹，便于跨产物核对实验口径。"""
+    serialized = json.dumps(
+        to_serializable_dict(config),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:16]
 
 
 def _load_benchmark_config(raw_benchmark: dict[str, Any]) -> BenchmarkConfig:

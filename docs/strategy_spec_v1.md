@@ -71,9 +71,9 @@
 - 默认基线配置：
   - [`tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
 - 候选优化配置：
-  - [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
-  - [`tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)
-  - [`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
+  - [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/archive/factor_research/tushare_scoring_v2.json)
+  - [`tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/archive/factor_research/tushare_scoring_v2_lite.json)
+  - [`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/archive/factor_research/tushare_scoring_v3.json)
 
 当前原则是：
 

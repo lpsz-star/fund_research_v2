@@ -8,8 +8,12 @@ def render_candidate_validation_report(path: Path, validation: dict[str, object]
     summary = validation.get("summary", {}) if isinstance(validation.get("summary"), dict) else {}
     style_phase_summary = validation.get("style_phase_summary", {}) if isinstance(validation.get("style_phase_summary"), dict) else {}
     attribution_summary = validation.get("attribution_summary", {}) if isinstance(validation.get("attribution_summary"), dict) else {}
-    lines = ["# Candidate Validation Report", "", "## Executive Summary", ""]
+    lines = ["# Candidate Validation Report", ""]
+    lines.extend(_render_config_identity(summary))
+    lines.extend(["## Executive Summary", ""])
     for key, value in summary.items():
+        if key in {"candidate_config", "baseline_config"}:
+            continue
         lines.append(f"- {key}: {value}")
     lines.extend(["", "## Style Phase Conclusion", ""])
     for key, value in style_phase_summary.items():
@@ -71,3 +75,19 @@ def render_excess_attribution_report(path: Path, validation: dict[str, object]) 
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _render_config_identity(summary: dict[str, object]) -> list[str]:
+    """把 candidate 与 baseline 的配置身份固定展示在报告顶部。"""
+    lines = ["## Config Identity", ""]
+    for label, key in [("Candidate", "candidate_config"), ("Baseline", "baseline_config")]:
+        value = summary.get(key, {})
+        if isinstance(value, dict):
+            lines.append(
+                f"- {label}: path={value.get('config_path', '')} "
+                f"fingerprint={value.get('config_fingerprint', '')} data_source={value.get('data_source', '')}"
+            )
+        else:
+            lines.append(f"- {label}: {value}")
+    lines.extend([""])
+    return lines

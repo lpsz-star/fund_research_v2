@@ -12,8 +12,8 @@
 - 默认评分体系回退配置：[config.py](/Users/liupeng/.codex/projects/fund_research_v2/src/fund_research_v2/common/config.py)
 - 实验配置：
   - [`tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
-  - [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
-  - [`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
+  - [`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/archive/factor_research/tushare_scoring_v2.json)
+  - [`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/archive/factor_research/tushare_scoring_v3.json)
 
 ## 1. 当前口径
 
@@ -320,7 +320,7 @@
 
 ### 3.3 `tushare_scoring_v2`
 
-- 配置文件：[`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
+- 配置文件：[`tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/archive/factor_research/tushare_scoring_v2.json)
 
 类间权重：
 
@@ -349,7 +349,7 @@
 
 ### 3.4 `tushare_scoring_v3`
 
-- 配置文件：[`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
+- 配置文件：[`tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/archive/factor_research/tushare_scoring_v3.json)
 
 类间权重：
 

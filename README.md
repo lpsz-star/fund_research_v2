@@ -148,21 +148,35 @@
 它不会重写整份 raw 快照，而是只根据上一次 `dataset_snapshot.json` 中记录的 `fetch_diagnostics.api_error_samples`，
 对失败的 `ts_code` 重新预热 `fund_manager` / `fund_nav` / `fund_share` 这类单接口缓存，降低下一次全量重跑的无效联网开销。
 
-当前除了默认基线配置，还保留三条非默认评分体系配置：
+当前配置按三层管理：
 
-- [`configs/tushare_scoring_v2.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2.json)
-- [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json)
-- [`configs/tushare_scoring_v3.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v3.json)
-
-它们的用途主要是：
-- 作为历史候选或新候选继续做对照实验
-- 验证不同因子组合是否值得进入下一轮默认 baseline 讨论
-- 观察收益改善是否伴随波动、回撤和换仓恶化
+- 默认 baseline：
+  - [`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
+- 正式候选：
+  - [`configs/candidates/tushare_scoring_v5_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_candidate.json)
+- 历史研究归档：
+  - [`configs/archive/factor_research/`](/Users/liupeng/.codex/projects/fund_research_v2/configs/archive/factor_research)
 
 当前默认 baseline 已升级为：
 - [`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)
 
-它当前采用的评分结构与 [`configs/tushare_scoring_v2_lite.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare_scoring_v2_lite.json) 一致。
+当前正式候选是：
+- [`configs/candidates/tushare_scoring_v5_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_candidate.json)
+
+配置治理规则见：
+- [`docs/config_governance.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/config_governance.md)
+
+最常用的两套命令入口只有这两类：
+
+```bash
+# baseline
+make run-tushare
+
+# current candidate
+make run-tushare-candidate
+make analyze-tushare-candidate
+make validate-tushare-candidate
+```
 
 
 ## 4. 当前目录结构

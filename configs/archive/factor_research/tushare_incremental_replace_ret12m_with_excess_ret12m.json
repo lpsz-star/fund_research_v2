@@ -1,0 +1,88 @@
+{
+  "as_of_date": "2026-03-01",
+  "data_source": "tushare",
+  "lookback_months": 48,
+  "local_secret_path": "configs/local.json",
+  "universe": {
+    "allowed_primary_types": ["主动股票", "偏股混合", "灵活配置混合"],
+    "exclude_name_keywords": ["ETF", "联接", "指数", "LOF", "FOF", "QDII", "债", "货币"],
+    "min_history_months": 24,
+    "min_assets_cny_mn": 200.0
+  },
+  "ranking": {
+    "candidate_count": 12,
+    "factor_weights": {
+      "performance_quality": 0.50,
+      "risk_control": 0.35,
+      "stability_quality": 0.15
+    },
+    "category_factors": {
+      "performance_quality": {
+        "excess_ret_12m": 1.0
+      },
+      "risk_control": {
+        "downside_vol_12m": 0.55,
+        "worst_3m_avg_return_12m": 0.45
+      },
+      "stability_quality": {
+        "asset_stability_12m": 1.0
+      }
+    }
+  },
+  "portfolio": {
+    "portfolio_size": 6,
+    "weighting_method": "equal_weight",
+    "single_fund_cap": 0.2,
+    "single_company_max": 2
+  },
+  "backtest": {
+    "start_month": "2023-01",
+    "end_month": "2026-02",
+    "benchmark_field": "benchmark_return_1m",
+    "transaction_cost_bps": 10.0,
+    "missing_return_policy": "zero_fill_legacy",
+    "missing_weight_warning_threshold": 0.05
+  },
+  "benchmark": {
+    "source": "tushare_index",
+    "default_key": "broad_equity",
+    "series": {
+      "broad_equity": {
+        "ts_code": "000906.SH",
+        "name": "中证800"
+      },
+      "large_cap_equity": {
+        "ts_code": "000300.SH",
+        "name": "沪深300"
+      }
+    },
+    "primary_type_map": {
+      "主动股票": "broad_equity",
+      "偏股混合": "broad_equity",
+      "灵活配置混合": "broad_equity"
+    }
+  },
+  "reporting": {
+    "top_ranked_limit": 10
+  },
+  "tushare": {
+    "fund_market": "O",
+    "fund_status": "L",
+    "download_enabled": true,
+    "use_cached_raw": true,
+    "start_date": "20200101",
+    "end_date": null,
+    "max_funds": 10000,
+    "request_retry_count": 2,
+    "request_pause_ms": 0,
+    "progress_every_entities": 10
+  },
+  "paths": {
+    "raw_dir": "data/raw",
+    "clean_dir": "outputs/clean",
+    "feature_dir": "outputs/feature",
+    "result_dir": "outputs/result",
+    "report_dir": "outputs/reports",
+    "experiment_dir": "outputs/experiments"
+  }
+}

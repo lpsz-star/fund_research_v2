@@ -139,6 +139,7 @@ def render_factor_evaluation_report(path: Path, evaluation: dict[str, object]) -
     distribution_rows = evaluation.get("distribution_rows", []) if isinstance(evaluation.get("distribution_rows"), list) else []
     bucket_rows = evaluation.get("bucket_rows", []) if isinstance(evaluation.get("bucket_rows"), list) else []
     correlation_rows = evaluation.get("correlation_rows", []) if isinstance(evaluation.get("correlation_rows"), list) else []
+    scorecard_rows = evaluation.get("scorecard_rows", []) if isinstance(evaluation.get("scorecard_rows"), list) else []
     high_correlation_rows = [row for row in correlation_rows if int(row.get("high_correlation_flag", 0)) == 1]
     lines = [
         "# Factor Evaluation Report",
@@ -148,6 +149,14 @@ def render_factor_evaluation_report(path: Path, evaluation: dict[str, object]) -
     ]
     for key, value in summary.items():
         lines.append(f"- {key}: {value}")
+    lines.extend(["", "## Research Scorecard", ""])
+    for row in scorecard_rows:
+        lines.append(
+            f"- {row['factor_name']}: role={row['research_role']} conclusion={row['admission_conclusion']} "
+            f"semantic={row['semantic_rationality']} time_boundary={row['time_boundary_cleanliness']} "
+            f"ranking={row['ranking_ability']} stability={row['time_varying_stability']} "
+            f"coverage={row['coverage_quality']} style={row['style_explanation']}"
+        )
     lines.extend(["", "## Factor Diagnostics", ""])
     for row in factor_rows:
         lines.append(

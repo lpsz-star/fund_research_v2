@@ -15,13 +15,14 @@ from fund_research_v2.cli import main
 from fund_research_v2.common.config import load_config
 from fund_research_v2.common.date_utils import add_months, decision_date_for_month, is_available_by_decision_date, is_available_by_month_end, iter_months, latest_completed_month, month_end, month_start
 from fund_research_v2.common.io_utils import read_csv
-from fund_research_v2.common.workflows import analyze_robustness_command, compare_experiments_command, comparison_dir, factor_evaluation_dir, fetch_failed_command, prepare_bundle, robustness_dir, run_experiment_command, run_portfolio_command, run_universe_command
+from fund_research_v2.common.workflows import analyze_robustness_command, candidate_validation_dir, compare_experiments_command, comparison_dir, factor_evaluation_dir, fetch_failed_command, prepare_bundle, robustness_dir, run_experiment_command, run_portfolio_command, run_universe_command, validate_baseline_candidate_command
 from fund_research_v2.data_ingestion.providers import DatasetSnapshot, load_cached_dataset
 from fund_research_v2.data_ingestion.providers import TushareDataProvider
 from fund_research_v2.data_processing.fund_liquidity_classifier import classify_fund_liquidity
 from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
 from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
 from fund_research_v2.evaluation.metrics import summarize_backtest
+from fund_research_v2.evaluation.robustness import default_baseline_config_path
 from fund_research_v2.features.feature_builder import build_feature_rows
 from fund_research_v2.portfolio.construction import build_portfolio
 from fund_research_v2.ranking.scoring_engine import score_funds
@@ -122,6 +123,35 @@ class PipelineTest(unittest.TestCase):
         """返回某个数据源在 raw 层的实际缓存目录。"""
         return root / "data" / "raw" / data_source
 
+    def test_prepare_bundle_supports_nested_config_directory(self) -> None:
+        """验证配置迁到 configs 子目录后，项目根目录和本地密钥路径仍能正确解析。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        (root / "configs" / "candidates").mkdir(parents=True, exist_ok=True)
+        (root / "configs" / "local.json").write_text(json.dumps({"tushare_token": "dummy"}, ensure_ascii=False), encoding="utf-8")
+        config = self._base_config(root)
+        config["data_source"] = "sample"
+        config_path = root / "configs" / "candidates" / "sample_candidate.json"
+        config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+
+        bundle = prepare_bundle(config_path)
+
+        self.assertEqual(Path(bundle["project_root"]).resolve(), root.resolve())
+
+    def test_default_baseline_config_path_supports_nested_candidate_directory(self) -> None:
+        """验证候选配置放在 configs 子目录时，baseline 仍回退到 configs 根目录下的数据源基线。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        (root / "configs" / "candidates").mkdir(parents=True, exist_ok=True)
+        baseline_path = root / "configs" / "tushare.json"
+        baseline_path.write_text("{}", encoding="utf-8")
+        candidate_path = root / "configs" / "candidates" / "tushare_scoring_v5_candidate.json"
+        candidate_path.write_text("{}", encoding="utf-8")
+
+        resolved = default_baseline_config_path(candidate_path, "tushare")
+
+        self.assertEqual(resolved.resolve(), baseline_path.resolve())
+
     def test_run_experiment_writes_outputs(self) -> None:
         """验证完整实验流程会产出 clean、feature、result 和 report 各层关键文件。"""
         root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
@@ -145,6 +175,7 @@ class PipelineTest(unittest.TestCase):
         factor_eval_dir = factor_evaluation_dir(load_config(config_path), root)
         self.assertTrue((factor_eval_dir / "factor_evaluation.json").exists())
         self.assertTrue((factor_eval_dir / "factor_evaluation.csv").exists())
+        self.assertTrue((factor_eval_dir / "factor_research_scorecard.csv").exists())
         self.assertTrue((factor_eval_dir / "factor_distribution.csv").exists())
         self.assertTrue((factor_eval_dir / "factor_bucket_performance.csv").exists())
         self.assertTrue((factor_eval_dir / "factor_correlation.csv").exists())
@@ -201,6 +232,7 @@ class PipelineTest(unittest.TestCase):
         self.assertIn("Distribution Diagnostics", (factor_eval_dir / "factor_evaluation_report.md").read_text(encoding="utf-8"))
         self.assertIn("Bucket Diagnostics", (factor_eval_dir / "factor_evaluation_report.md").read_text(encoding="utf-8"))
         self.assertIn("High Correlation Pairs", (factor_eval_dir / "factor_evaluation_report.md").read_text(encoding="utf-8"))
+        self.assertIn("Research Scorecard", (factor_eval_dir / "factor_evaluation_report.md").read_text(encoding="utf-8"))
 
     def test_run_experiment_fast_skips_heavy_outputs_but_keeps_core_results(self) -> None:
         """验证快速模式跳过重型附加产物，但保留主链路结果与报告。"""
@@ -326,11 +358,11 @@ class PipelineTest(unittest.TestCase):
     def test_cli_dispatches_analyze_robustness_command(self) -> None:
         """验证 CLI 已暴露稳健性分析入口。"""
         with mock.patch("fund_research_v2.cli.analyze_robustness_command") as mocked_command:
-            with mock.patch.object(sys, "argv", ["fund_research_v2", "analyze-robustness", "--config", "configs/tushare_scoring_v2.json"]):
+            with mock.patch.object(sys, "argv", ["fund_research_v2", "analyze-robustness", "--config", "configs/archive/factor_research/tushare_scoring_v2.json"]):
                 exit_code = main()
 
         self.assertEqual(exit_code, 0)
-        mocked_command.assert_called_once_with(Path("configs/tushare_scoring_v2.json"))
+        mocked_command.assert_called_once_with(Path("configs/archive/factor_research/tushare_scoring_v2.json"))
 
     def test_fetch_failed_command_writes_retry_summary_and_report(self) -> None:
         """验证失败增量补抓会基于上次错误样本生成补抓摘要与报告。"""
@@ -447,8 +479,45 @@ class PipelineTest(unittest.TestCase):
         self.assertTrue((output_dir / "robustness_report.md").exists())
         summary = json.loads((output_dir / "robustness_summary.json").read_text(encoding="utf-8"))
         self.assertIn("overall_assessment", summary)
+        self.assertEqual(summary["candidate_config"]["config_path"], "configs/sample_scoring_v2.json")
+        self.assertEqual(summary["baseline_config"]["config_path"], "configs/sample.json")
+        self.assertTrue(summary["candidate_config"]["config_fingerprint"])
+        self.assertTrue(summary["baseline_config"]["config_fingerprint"])
         report_text = (output_dir / "robustness_report.md").read_text(encoding="utf-8")
         self.assertIn("Robustness Report", report_text)
+        self.assertIn("Config Identity", report_text)
+        self.assertIn("configs/sample_scoring_v2.json", report_text)
+        self.assertIn("configs/sample.json", report_text)
+
+    def test_validate_baseline_candidate_writes_config_identity(self) -> None:
+        """验证候选配置校验摘要会写入可追溯的配置路径和配置指纹。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        baseline_config = self._base_config(root)
+        candidate_config = self._base_config(root)
+        candidate_config["ranking"]["category_factors"] = {
+            "performance_quality": {"excess_ret_12m": 1.0},
+            "risk_control": {"downside_vol_12m": 0.55, "worst_3m_avg_return_12m": 0.45},
+            "stability_quality": {"asset_stability_12m": 0.7, "manager_post_change_excess_delta_12m": 0.3},
+        }
+        (root / "configs").mkdir(parents=True, exist_ok=True)
+        baseline_path = root / "configs" / "sample.json"
+        baseline_path.write_text(json.dumps(baseline_config, ensure_ascii=False, indent=2), encoding="utf-8")
+        candidate_path = root / "configs" / "sample_scoring_v2.json"
+        candidate_path.write_text(json.dumps(candidate_config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        validate_baseline_candidate_command(candidate_path)
+
+        output_dir = candidate_validation_dir(load_config(candidate_path), root)
+        summary = json.loads((output_dir / "candidate_validation_summary.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["candidate_config"]["config_path"], "configs/sample_scoring_v2.json")
+        self.assertEqual(summary["baseline_config"]["config_path"], "configs/sample.json")
+        self.assertTrue(summary["candidate_config"]["config_fingerprint"])
+        self.assertTrue(summary["baseline_config"]["config_fingerprint"])
+        report_text = (output_dir / "candidate_validation_report.md").read_text(encoding="utf-8")
+        self.assertIn("Config Identity", report_text)
+        self.assertIn("configs/sample_scoring_v2.json", report_text)
+        self.assertIn("configs/sample.json", report_text)
 
     def test_cli_dispatches_fetch_failed_command(self) -> None:
         """验证 CLI 已暴露失败增量补抓入口，避免工作流存在实现但无法调用。"""
@@ -2050,6 +2119,15 @@ class PipelineTest(unittest.TestCase):
             def fund_company(self):
                 return pd.DataFrame([])
 
+            def trade_cal(self, **_: object):
+                return pd.DataFrame(
+                    [
+                        {"cal_date": "20260227", "is_open": 1},
+                        {"cal_date": "20260228", "is_open": 0},
+                        {"cal_date": "20260302", "is_open": 1},
+                    ]
+                )
+
         provider.client = ClientLike()
         provider._call_api = lambda _api_name, func, **kwargs: func(**kwargs)  # type: ignore[method-assign]
         provider._fetch_current_manager = lambda ts_code: ("经理甲", "2024-01-01")  # type: ignore[method-assign]
@@ -2059,6 +2137,7 @@ class PipelineTest(unittest.TestCase):
         def fake_fetch_entity_monthly_nav_rows(
             rows: list[dict[str, object]],
             entity_id: str,
+            trade_calendar_rows: list[dict[str, object]],
         ) -> tuple[float, list[dict[str, object]], list[dict[str, object]]]:
             return 123.0, [
                 {
@@ -2264,11 +2343,14 @@ class PipelineTest(unittest.TestCase):
 
         result = evaluate_factors(feature_rows, nav_rows)
         row_map = {str(row["factor_name"]): row for row in result["factor_rows"]}
+        scorecard_map = {str(row["factor_name"]): row for row in result["scorecard_rows"]}
 
         self.assertEqual(int(row_map["ret_12m"]["direction_ok"]), 1)
         self.assertEqual(int(row_map["vol_12m"]["direction_ok"]), 1)
         self.assertGreater(float(row_map["ret_12m"]["avg_rankic"]), 0.0)
         self.assertGreater(float(row_map["vol_12m"]["avg_rankic"]), 0.0)
+        self.assertEqual(str(scorecard_map["excess_ret_12m"]["ranking_ability"]), "insufficient")
+        self.assertEqual(str(scorecard_map["ret_12m"]["style_explanation"]), "clear_but_redundant")
         self.assertIn("excess_consistency_12m", row_map)
         self.assertTrue(any(str(row["factor_name"]) == "ret_12m" for row in result["distribution_rows"]))
         self.assertTrue(any(str(row["factor_name"]) == "ret_12m" for row in result["bucket_rows"]))
@@ -2287,6 +2369,7 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(int(result["summary"]["factor_count"]), 24)
         self.assertTrue(all(int(row["evaluation_months"]) == 0 for row in result["factor_rows"]))
         self.assertTrue(all(int(row["bucket_evaluation_months"]) == 0 for row in result["bucket_rows"]))
+        self.assertTrue(all(str(row["ranking_ability"]) == "insufficient" for row in result["scorecard_rows"]))
 
     def test_factor_evaluation_distribution_and_correlation_handle_constant_and_missing_values(self) -> None:
         """验证分布、分层和相关性诊断在常数因子与缺失值下仍能稳定输出。"""
@@ -2308,6 +2391,7 @@ class PipelineTest(unittest.TestCase):
         result = evaluate_factors(feature_rows, nav_rows)
         distribution_map = {str(row["factor_name"]): row for row in result["distribution_rows"]}
         bucket_map = {str(row["factor_name"]): row for row in result["bucket_rows"]}
+        scorecard_map = {str(row["factor_name"]): row for row in result["scorecard_rows"]}
         correlation_map = {
             (str(row["factor_left"]), str(row["factor_right"])): row
             for row in result["correlation_rows"]
@@ -2317,6 +2401,7 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(float(distribution_map["manager_tenure_months"]["std"]), 0.0)
         self.assertEqual(int(bucket_map["ret_6m"]["bucket_evaluation_months"]), 1)
         self.assertEqual(int(correlation_map[("ret_6m", "excess_ret_12m")]["high_correlation_flag"]), 1)
+        self.assertEqual(str(scorecard_map["manager_tenure_months"]["time_boundary_cleanliness"]), "needs_audit")
 
     def test_feature_builder_uses_type_mapped_benchmark(self) -> None:
         """验证不同 primary_type 会映射到不同 benchmark 序列，而不是统一扣同一条市场基准。"""
