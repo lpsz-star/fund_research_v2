@@ -9,7 +9,7 @@ from fund_research_v2.common.contracts import DatasetSnapshot
 from fund_research_v2.common.date_utils import add_months
 from fund_research_v2.evaluation.factor_evaluator import _rank_correlation, _to_float, _top_bottom_spread
 from fund_research_v2.evaluation.metrics import summarize_backtest
-from fund_research_v2.portfolio.construction import build_portfolio
+from fund_research_v2.portfolio.construction import build_portfolio_trajectory
 
 
 def build_robustness_analysis(
@@ -285,15 +285,7 @@ def _build_robustness_summary(
 
 def _build_monthly_portfolios(config: AppConfig, score_rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """为每个研究月构建一份历史目标组合，用于行为诊断。"""
-    rows: list[dict[str, object]] = []
-    months = sorted({str(row["month"]) for row in score_rows})
-    for month in months:
-        month_rows = [row for row in score_rows if str(row["month"]) == month]
-        for portfolio_row in build_portfolio(config, month_rows):
-            annotated = dict(portfolio_row)
-            annotated["month"] = month
-            rows.append(annotated)
-    return rows
+    return build_portfolio_trajectory(config, score_rows)
 
 
 def _time_slice_definitions(months: list[str]) -> list[tuple[str, str, list[str]]]:

@@ -33,6 +33,7 @@
 make run-sample
 make run-tushare
 make run-tushare-candidate
+PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/candidates/tushare_scoring_v5_quarterly_candidate.json
 ```
 
 当真实抓数上一次只失败了少量份额接口时，允许先走失败增量补抓：
@@ -50,6 +51,7 @@ make run-tushare
 PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/default.json
 PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/tushare.json
 PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/candidates/tushare_scoring_v5_candidate.json
+PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/candidates/tushare_scoring_v5_quarterly_candidate.json
 ```
 
 当前标准实验对比命令：
@@ -138,6 +140,12 @@ PYTHONPATH=src python3 -m fund_research_v2 audit-field-availability --config con
 - [`factor_evaluation.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_evaluation.csv)
 - [`factor_research_scorecard.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/factor_evaluation/factor_research_scorecard.csv)
 - [`type_baseline_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/sample/result/type_baseline_snapshot.json)
+
+补充说明：
+
+- `portfolio_target_monthly.csv` 现在是“月度组合轨迹”
+- `portfolio_snapshot.json` 仍只表示最新正式研究月的当前建议组合
+- 若实验使用季度调仓，最新月可能是非季度月，此时组合会显示最近一次季度调仓的 carry-forward 结果
 
 ### 3.3 报告层
 
@@ -233,11 +241,13 @@ make run-tushare
 当前仓库里正式保留的候选评分配置是：
 
 - [`tushare_scoring_v5_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_candidate.json)
+- [`tushare_scoring_v5_quarterly_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_quarterly_candidate.json)
 
 它对应的运行方式是：
 
 ```bash
 make run-tushare-candidate
+PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/candidates/tushare_scoring_v5_quarterly_candidate.json
 PYTHONPATH=src python3 -m fund_research_v2 compare-experiments --config configs/candidates/tushare_scoring_v5_candidate.json
 ```
 

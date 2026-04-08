@@ -1,4 +1,5 @@
 import shutil
+import csv
 import sys
 import tempfile
 from pathlib import Path
@@ -96,6 +97,40 @@ class WebViewerTest(PipelineTestBase):
         self.assertEqual(portfolio_status, "200 OK")
         self.assertIn("Portfolio unavailable", portfolio_body)
         self.assertIn("make portfolio-sample", portfolio_body)
+
+    def test_portfolio_page_filters_monthly_trajectory_to_latest_snapshot(self) -> None:
+        """验证组合页只展示 latest_month 的持仓，而不是把全历史轨迹全部展开。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-web-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["portfolio"]["rebalance_frequency"] = "quarterly"
+        config_path = self._write_config(root, config_payload)
+        run_experiment_command(config_path)
+        portfolio_csv = self._scoped_output_dir(root, "sample", "result") / "portfolio_target_monthly.csv"
+        with portfolio_csv.open("r", encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+            fieldnames = list(rows[0].keys())
+        rows.append(
+            {
+                **rows[0],
+                "month": "2025-11",
+                "entity_name": "历史占位基金",
+                "source_signal_month": "2025-09",
+                "portfolio_generation_mode": "carry_forward",
+            }
+        )
+        with portfolio_csv.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        app = create_web_app(config_path)
+
+        portfolio_status, portfolio_body = self._invoke_app(app, "/portfolio")
+
+        self.assertEqual(portfolio_status, "200 OK")
+        self.assertIn("Latest Portfolio Snapshot", portfolio_body)
+        self.assertIn("2026-02", portfolio_body)
+        self.assertNotIn("历史占位基金", portfolio_body)
 
     def test_build_backtest_curve_rows_compounds_returns(self) -> None:
         """验证累计曲线只基于现有月度收益做只读累乘。"""

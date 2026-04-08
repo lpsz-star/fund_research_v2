@@ -105,6 +105,13 @@
 - 基金流动性审计表
 - 月频基金池表
 
+其中月频基金池、特征、评分结果都会额外带上：
+
+- `official_research_month`
+- `research_month_status`
+- `is_rebalance_month`
+- `rebalance_frequency`
+
 ### 2.3 `outputs/<data_source>/feature`
 
 特征层：
@@ -117,8 +124,20 @@
 
 - `fund_score_monthly.csv`
 - `portfolio_target_monthly.csv`
+- `portfolio_snapshot.json`
 - `backtest_monthly.csv`
 - `backtest_summary.json`
+
+其中：
+
+- `portfolio_target_monthly.csv`
+  - 保存逐月组合轨迹，而不再只是“最新一期组合”
+  - 若为季度调仓，非季度月会写出 carry-forward 后的月度持仓
+- `portfolio_snapshot.json`
+  - 仍只代表最新正式研究月对应的当前建议组合
+- `backtest_monthly.csv`
+  - 即使季度调仓，也仍逐月输出
+  - 会新增 `source_signal_month`、`is_rebalance_month`、`rebalance_frequency`、`portfolio_generation_mode`
 
 ### 2.5 `outputs/<data_source>/experiments`
 

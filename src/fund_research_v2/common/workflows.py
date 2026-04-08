@@ -8,7 +8,7 @@ import sys
 
 from fund_research_v2.backtest.engine import prepare_backtest_execution_cache, run_backtest
 from fund_research_v2.common.config import AppConfig, config_fingerprint, load_config, scope_artifact_dir, to_serializable_dict
-from fund_research_v2.common.date_utils import current_timestamp, latest_completed_month
+from fund_research_v2.common.date_utils import current_timestamp, is_rebalance_month, latest_completed_month
 from fund_research_v2.common.io_utils import append_jsonl, ensure_directories, write_csv, write_json
 from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, load_dataset, warm_failed_api_cache
 from fund_research_v2.evaluation.experiment_comparator import build_experiment_comparison, load_portfolio_snapshot, read_experiment_records
@@ -18,7 +18,7 @@ from fund_research_v2.evaluation.robustness import build_robustness_analysis, de
 from fund_research_v2.evaluation.metrics import summarize_backtest
 from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
 from fund_research_v2.features.feature_builder import build_feature_rows
-from fund_research_v2.portfolio.construction import build_portfolio
+from fund_research_v2.portfolio.construction import build_portfolio_trajectory
 from fund_research_v2.ranking.scoring_engine import score_funds
 from fund_research_v2.reporting.comparison_reports import render_comparison_report
 from fund_research_v2.reporting.candidate_validation_reports import (
@@ -175,7 +175,7 @@ def run_feature_command(config_path: Path) -> None:
     write_universe_audit_output(bundle)
     write_csv(
         artifact_dir(bundle["config"], bundle["project_root"], bundle["config"].paths.feature_dir) / "fund_feature_monthly.csv",
-        _annotate_research_month_status(bundle["config"], bundle["feature_rows"]),
+        _annotate_monthly_output_status(bundle["config"], bundle["feature_rows"]),
     )
 
 
@@ -186,7 +186,7 @@ def run_ranking_command(config_path: Path) -> None:
     write_universe_audit_output(bundle)
     write_csv(
         artifact_dir(bundle["config"], bundle["project_root"], bundle["config"].paths.result_dir) / "fund_score_monthly.csv",
-        _annotate_research_month_status(bundle["config"], bundle["score_rows"]),
+        _annotate_monthly_output_status(bundle["config"], bundle["score_rows"]),
     )
 
 
@@ -197,19 +197,20 @@ def run_portfolio_command(config_path: Path) -> None:
     project_root: Path = bundle["project_root"]
     score_rows = bundle["score_rows"]
     latest_month = _latest_research_month(config, score_rows)
+    portfolio_trajectory = build_portfolio_trajectory(config, score_rows)
     latest_scores = [row for row in score_rows if str(row["month"]) == latest_month]
-    portfolio_rows = build_portfolio(config, latest_scores)
+    latest_portfolio_rows = [row for row in portfolio_trajectory if str(row.get("month") or "") == latest_month]
     write_clean_outputs(bundle)
     write_universe_audit_output(bundle)
     write_csv(
         artifact_dir(config, project_root, config.paths.feature_dir) / "fund_feature_monthly.csv",
-        _annotate_research_month_status(config, bundle["feature_rows"]),
+        _annotate_monthly_output_status(config, bundle["feature_rows"]),
     )
     write_csv(
         artifact_dir(config, project_root, config.paths.result_dir) / "fund_score_monthly.csv",
-        _annotate_research_month_status(config, score_rows),
+        _annotate_monthly_output_status(config, score_rows),
     )
-    write_portfolio_outputs(bundle, latest_month, latest_scores, portfolio_rows)
+    write_portfolio_outputs(bundle, latest_month, latest_scores, portfolio_trajectory, latest_portfolio_rows)
 
 
 def run_backtest_command(config_path: Path) -> None:
@@ -234,9 +235,9 @@ def run_experiment_command(config_path: Path, fast_mode: bool = False) -> None:
     experiment_started_at = perf_counter()
     bundle = prepare_bundle(config_path)
     latest_month = _latest_research_month(bundle["config"], bundle["score_rows"])
-    # 组合只取最新月评分结果，是因为实验报告默认回答“如果今天运行系统，会给出什么建议”。
     latest_scores = [row for row in bundle["score_rows"] if str(row["month"]) == latest_month]
-    portfolio_rows = build_portfolio(bundle["config"], latest_scores)
+    portfolio_trajectory = build_portfolio_trajectory(bundle["config"], bundle["score_rows"])
+    latest_portfolio_rows = [row for row in portfolio_trajectory if str(row.get("month") or "") == latest_month]
     backtest_started_at = perf_counter()
     backtest_rows, position_audit_rows = run_backtest(
         config=bundle["config"],
@@ -250,7 +251,7 @@ def run_experiment_command(config_path: Path, fast_mode: bool = False) -> None:
     _emit_timing("run_backtest", perf_counter() - backtest_started_at)
     backtest_summary = summarize_backtest(backtest_rows)
     output_started_at = perf_counter()
-    write_full_outputs(bundle, backtest_rows, position_audit_rows, backtest_summary, portfolio_rows, fast_mode=fast_mode)
+    write_full_outputs(bundle, backtest_rows, position_audit_rows, backtest_summary, portfolio_trajectory, latest_portfolio_rows, fast_mode=fast_mode)
     _emit_timing("write_full_outputs", perf_counter() - output_started_at)
     _emit_timing("run_experiment_total", perf_counter() - experiment_started_at)
 
@@ -314,8 +315,8 @@ def _latest_research_month(config: AppConfig, rows: list[dict[str, object]]) -> 
     return eligible_months[-1] if eligible_months else available_months[-1]
 
 
-def _annotate_research_month_status(config: AppConfig, rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    """为月频结果增加“正式月 / 观察月”状态，避免把月内快照误读成正式信号。"""
+def _annotate_monthly_output_status(config: AppConfig, rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """为月频结果增加正式月状态和调仓频率标记。"""
     official_month = _latest_research_month(config, rows)
     completed_cutoff = latest_completed_month(config.as_of_date)
     annotated_rows: list[dict[str, object]] = []
@@ -324,6 +325,8 @@ def _annotate_research_month_status(config: AppConfig, rows: list[dict[str, obje
         annotated = dict(row)
         annotated["official_research_month"] = 1 if month == official_month else 0
         annotated["research_month_status"] = "official" if month and month <= completed_cutoff else "observation_only"
+        annotated["is_rebalance_month"] = 1 if month and is_rebalance_month(month, config.portfolio.rebalance_frequency) else 0
+        annotated["rebalance_frequency"] = config.portfolio.rebalance_frequency
         annotated_rows.append(annotated)
     return annotated_rows
 
@@ -343,7 +346,7 @@ def write_clean_outputs(bundle: dict[str, object]) -> None:
     write_csv(clean_dir / "manager_assignment_monthly.csv", dataset.manager_assignment_monthly)
     write_csv(clean_dir / "fund_type_audit.csv", dataset.fund_type_audit)
     write_csv(clean_dir / "fund_liquidity_audit.csv", dataset.fund_liquidity_audit)
-    write_csv(clean_dir / "fund_universe_monthly.csv", universe.rows)
+    write_csv(clean_dir / "fund_universe_monthly.csv", _annotate_monthly_output_status(config, universe.rows))
     write_json(clean_dir / "dataset_snapshot.json", dataset.metadata)
     ingestion_audit = dataset.metadata.get("ingestion_audit", {}) if isinstance(dataset.metadata.get("ingestion_audit"), dict) else {}
     dropped_entities = ingestion_audit.get("dropped_entities", []) if isinstance(ingestion_audit.get("dropped_entities"), list) else []
@@ -355,7 +358,8 @@ def write_full_outputs(
     backtest_rows: list[dict[str, object]],
     position_audit_rows: list[dict[str, object]],
     backtest_summary: dict[str, object],
-    portfolio_rows: list[dict[str, object]],
+    portfolio_trajectory_rows: list[dict[str, object]],
+    latest_portfolio_rows: list[dict[str, object]],
     fast_mode: bool = False,
 ) -> None:
     """把完整实验产生的特征、结果、报告和实验记录一次性写出。"""
@@ -364,8 +368,8 @@ def write_full_outputs(
     dataset = bundle["dataset"]
     feature_rows = bundle["feature_rows"]
     score_rows = bundle["score_rows"]
-    feature_rows_with_status = _annotate_research_month_status(config, feature_rows)
-    score_rows_with_status = _annotate_research_month_status(config, score_rows)
+    feature_rows_with_status = _annotate_monthly_output_status(config, feature_rows)
+    score_rows_with_status = _annotate_monthly_output_status(config, score_rows)
     # 只有完整实验才同时产出 feature/result/report/experiment，这样可以把“研究快照”一次性固化下来。
     write_clean_outputs(bundle)
     write_universe_audit_output(bundle)
@@ -373,8 +377,7 @@ def write_full_outputs(
     write_csv(artifact_dir(config, project_root, config.paths.result_dir) / "fund_score_monthly.csv", score_rows_with_status)
     latest_month = _latest_research_month(config, score_rows)
     latest_scores = [row for row in score_rows if str(row["month"]) == latest_month]
-    if portfolio_rows:
-        write_portfolio_outputs(bundle, latest_month, latest_scores, portfolio_rows)
+    write_portfolio_outputs(bundle, latest_month, latest_scores, portfolio_trajectory_rows, latest_portfolio_rows)
     result_dir = artifact_dir(config, project_root, config.paths.result_dir)
     write_csv(result_dir / "backtest_monthly.csv", backtest_rows)
     write_csv(result_dir / "backtest_position_audit.csv", position_audit_rows)
@@ -402,7 +405,7 @@ def write_full_outputs(
         _latest_research_month(config, bundle["universe"].rows),
     )
     write_json(result_dir / "type_baseline_snapshot.json", type_baseline)
-    experiment_record = build_experiment_record(config, project_root, dataset.metadata, backtest_summary, portfolio_rows, type_baseline, factor_evaluation)
+    experiment_record = build_experiment_record(config, project_root, dataset.metadata, backtest_summary, latest_portfolio_rows, type_baseline, factor_evaluation)
     append_jsonl(artifact_dir(config, project_root, config.paths.experiment_dir) / "experiment_registry.jsonl", experiment_record)
     if not fast_mode:
         _refresh_latest_comparison_outputs(config, project_root)
@@ -414,7 +417,7 @@ def write_full_outputs(
         config=config,
         dataset_metadata=dataset.metadata,
         score_rows=score_rows,
-        portfolio_rows=portfolio_rows,
+        portfolio_rows=latest_portfolio_rows,
         backtest_rows=backtest_rows,
         backtest_summary=backtest_summary,
     )
@@ -440,7 +443,8 @@ def write_portfolio_outputs(
     bundle: dict[str, object],
     latest_month: str,
     latest_scores: list[dict[str, object]],
-    portfolio_rows: list[dict[str, object]],
+    portfolio_trajectory_rows: list[dict[str, object]],
+    latest_portfolio_rows: list[dict[str, object]],
 ) -> None:
     """把最新一期组合建议的结果文件和报告保持为同一快照。"""
     config: AppConfig = bundle["config"]
@@ -448,7 +452,7 @@ def write_portfolio_outputs(
     dataset = bundle["dataset"]
     # 组合 CSV、快照 JSON 和 Markdown 报告必须一起刷新，否则用户会看到同一期组合对应多份不同口径的解释。
     result_dir = artifact_dir(config, project_root, config.paths.result_dir)
-    write_csv(result_dir / "portfolio_target_monthly.csv", portfolio_rows)
+    write_csv(result_dir / "portfolio_target_monthly.csv", portfolio_trajectory_rows)
     write_json(
         result_dir / "portfolio_snapshot.json",
         {
@@ -461,8 +465,8 @@ def write_portfolio_outputs(
                 config.benchmark.series_for_key(config.benchmark.default_key).name,
             ),
             "eligible_count": len(latest_scores),
-            "portfolio_size": len(portfolio_rows),
-            "portfolio": portfolio_rows,
+            "portfolio_size": len(latest_portfolio_rows),
+            "portfolio": latest_portfolio_rows,
         },
     )
     render_portfolio_report(
@@ -471,7 +475,7 @@ def write_portfolio_outputs(
         dataset_metadata=dataset.metadata,
         latest_month=latest_month,
         latest_scores=latest_scores,
-        portfolio_rows=portfolio_rows,
+        portfolio_rows=latest_portfolio_rows,
     )
 
 
@@ -635,6 +639,7 @@ def git_commit_hash(project_root: Path) -> str:
         output = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=project_root, stderr=subprocess.DEVNULL)
     except Exception:
         return "unknown"
+    return output.decode("utf-8").strip()
 
 
 def _attach_config_identity(
@@ -663,7 +668,6 @@ def _config_identity(config: AppConfig, config_path: Path, project_root: Path) -
         "config_path": display_path,
         "config_fingerprint": config_fingerprint(config),
     }
-    return output.decode("utf-8").strip()
 
 
 def _hydrate_portfolio_summary(records: list[dict[str, object]]) -> list[dict[str, object]]:

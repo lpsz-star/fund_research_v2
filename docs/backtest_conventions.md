@@ -6,7 +6,12 @@
 
 ## 2. 时间口径
 
-当前回测按月决策、按交易日归属收益。
+当前回测支持两类调仓频率：
+
+- `monthly`
+- `quarterly`
+
+两类口径都按月输出回测记录，并按交易日归属收益。
 
 具体规则：
 
@@ -19,6 +24,15 @@
 - `T+3` 日新组合开始承担收益
 - 新组合持有到下一次 `decision_date`，并包含该日收益
 - 进入 `signal_month` 信号构造的数据，必须满足 `available_date <= decision_date`
+
+若 `portfolio.rebalance_frequency = quarterly`，则额外采用：
+
+- 仅 `3/6/9/12` 月为正式调仓月
+- 非季度月仍会输出月度回测行，但不发生真实换仓
+- 非季度月持仓沿用最近一次季度调仓结果
+- 非季度月 `turnover = 0`
+- 非季度月 `transaction_cost = 0`
+- 非季度月收益区间仍按相邻两个月 `decision_date` 之间切分，只做持仓延续
 
 例如：
 
@@ -119,6 +133,17 @@
 - 若某只基金因约束被过滤，不进入组合
 
 当前回测结果表会额外输出以下审计字段：
+
+- `source_signal_month`
+  - 当前月组合真正来源于哪一个评分月
+- `is_rebalance_month`
+  - 当前月是否为正式调仓月
+- `rebalance_frequency`
+  - 当前实验使用的调仓频率
+- `portfolio_generation_mode`
+  - 当前支持：
+    - `rebalance_new`
+    - `carry_forward`
 
 - `missing_weight`
   - 当前持有期内，缺少日收益记录的持仓权重占比

@@ -61,6 +61,13 @@
 - `as_of_date` 若尚未走到当月月末，则正式最新信号月自动回退到上一个完整月
 - 下月第 1 个交易日决策，`T` 卖出、`T+2` 到账、`T+3` 新组合开始承担收益
 
+当前也支持候选配置显式切到季度调仓：
+
+- 基金池、特征、评分仍按月生成
+- 仅 `3/6/9/12` 月为正式调仓月
+- 非季度月沿用最近一次季度调仓组合
+- 默认 baseline 仍保持月调仓，不会被隐式替换
+
 
 ## 3. 阅读与文档索引
 
@@ -137,6 +144,9 @@
 当前正式候选是：
 - [`configs/candidates/tushare_scoring_v5_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_candidate.json)
 
+当前另保留一份季度调仓候选配置：
+- [`configs/candidates/tushare_scoring_v5_quarterly_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_quarterly_candidate.json)
+
 配置治理规则见：
 - [`docs/config_governance.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/config_governance.md)
 
@@ -150,6 +160,9 @@ make run-tushare
 make run-tushare-candidate
 make analyze-tushare-candidate
 make validate-tushare-candidate
+
+# quarterly candidate
+PYTHONPATH=src python3 -m fund_research_v2 run-experiment --config configs/candidates/tushare_scoring_v5_quarterly_candidate.json
 ```
 
 

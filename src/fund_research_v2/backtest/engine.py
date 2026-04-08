@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from math import prod
 
 from fund_research_v2.common.config import AppConfig
-from fund_research_v2.common.date_utils import decision_date_for_month, iter_months, month_start, next_trading_day, shift_trading_days
-from fund_research_v2.portfolio.construction import build_portfolio
+from fund_research_v2.common.date_utils import decision_date_for_month, is_rebalance_month, iter_months, month_start, next_trading_day, shift_trading_days
+from fund_research_v2.portfolio.construction import build_portfolio_trajectory
 
 
 @dataclass(frozen=True)
@@ -119,12 +119,20 @@ def _run_backtest_with_daily_execution(
     backtest_rows: list[dict[str, object]] = []
     position_audit_rows: list[dict[str, object]] = []
     previous_weights: dict[str, float] = {}
+    monthly_portfolio_trajectory = build_portfolio_trajectory(config, score_rows, months=months)
+    portfolio_by_month: dict[str, list[dict[str, object]]] = defaultdict(list)
+    source_signal_month_by_month: dict[str, str] = {}
+    for row in monthly_portfolio_trajectory:
+        month = str(row.get("month") or "")
+        portfolio_by_month[month].append(row)
+        source_signal_month_by_month[month] = str(row.get("source_signal_month") or "")
 
     for current_month, next_month in zip(months, months[1:]):
-        portfolio = build_portfolio(config, scores_by_month.get(current_month, []))
+        portfolio = portfolio_by_month.get(current_month, [])
+        rebalance_flag = is_rebalance_month(current_month, config.portfolio.rebalance_frequency)
         current_weights = {str(row["entity_id"]): float(row["target_weight"]) for row in portfolio}
-        turnover = _turnover(previous_weights, current_weights)
-        transaction_cost = turnover * (config.backtest.transaction_cost_bps / 10000.0)
+        turnover = _turnover(previous_weights, current_weights) if rebalance_flag else 0.0
+        transaction_cost = turnover * (config.backtest.transaction_cost_bps / 10000.0) if rebalance_flag else 0.0
 
         schedule = execution_cache.schedule_by_month[current_month]
         decision_date = str(schedule["decision_date"])
@@ -132,18 +140,35 @@ def _run_backtest_with_daily_execution(
         cash_available_date = str(schedule["cash_available_date"])
         buy_effective_date = str(schedule["buy_effective_date"])
         transition_start_date = str(schedule["transition_start_date"])
-        period_trade_dates = _trade_dates_between(
-            execution_cache.open_trade_dates,
-            execution_cache.trade_date_index,
-            transition_start_date,
-            next_decision_date,
-        )
-        invested_trade_dates = _trade_dates_between(
-            execution_cache.open_trade_dates,
-            execution_cache.trade_date_index,
-            buy_effective_date,
-            next_decision_date,
-        )
+        if rebalance_flag:
+            period_trade_dates = _trade_dates_between(
+                execution_cache.open_trade_dates,
+                execution_cache.trade_date_index,
+                transition_start_date,
+                next_decision_date,
+            )
+            invested_trade_dates = _trade_dates_between(
+                execution_cache.open_trade_dates,
+                execution_cache.trade_date_index,
+                buy_effective_date,
+                next_decision_date,
+            )
+            period_type = "decision_t_plus_2_buy_t_plus_3"
+            holding_start_date = transition_start_date
+            row_cash_available_date = cash_available_date
+            row_buy_effective_date = buy_effective_date
+        else:
+            period_trade_dates = _trade_dates_between(
+                execution_cache.open_trade_dates,
+                execution_cache.trade_date_index,
+                transition_start_date,
+                next_decision_date,
+            )
+            invested_trade_dates = period_trade_dates
+            period_type = "carry_forward_no_rebalance"
+            holding_start_date = transition_start_date
+            row_cash_available_date = ""
+            row_buy_effective_date = ""
 
         gross_return, missing_weight, missing_position_count, period_position_rows = _portfolio_period_return(
             config=config,
@@ -161,12 +186,16 @@ def _run_backtest_with_daily_execution(
                 {
                     "valuation_month": current_month,
                     "signal_month": current_month,
-                    "execution_month": buy_effective_date[:7],
+                    "source_signal_month": source_signal_month_by_month.get(current_month, current_month),
+                    "execution_month": next_month,
                     "decision_date": decision_date,
-                    "cash_available_date": cash_available_date,
-                    "buy_effective_date": buy_effective_date,
-                    "holding_start_date": transition_start_date,
+                    "cash_available_date": row_cash_available_date,
+                    "buy_effective_date": row_buy_effective_date,
+                    "holding_start_date": holding_start_date,
                     "holding_end_date": next_decision_date,
+                    "is_rebalance_month": 1 if rebalance_flag else 0,
+                    "rebalance_frequency": config.portfolio.rebalance_frequency,
+                    "portfolio_generation_mode": "rebalance_new" if rebalance_flag else "carry_forward",
                     "entity_id": row["entity_id"],
                     "entity_name": row["entity_name"],
                     "target_weight": row["target_weight"],
@@ -185,15 +214,19 @@ def _run_backtest_with_daily_execution(
             {
                 "valuation_month": current_month,
                 "signal_month": current_month,
-                "execution_month": buy_effective_date[:7],
+                "source_signal_month": source_signal_month_by_month.get(current_month, current_month),
+                "execution_month": next_month,
                 "decision_date": decision_date,
-                "cash_available_date": cash_available_date,
-                "buy_effective_date": buy_effective_date,
-                "holding_start_date": transition_start_date,
+                "cash_available_date": row_cash_available_date,
+                "buy_effective_date": row_buy_effective_date,
+                "holding_start_date": holding_start_date,
                 "holding_end_date": next_decision_date,
                 "execution_request_date_proxy": decision_date,
-                "execution_effective_date_proxy": buy_effective_date,
-                "period_type": "decision_t_plus_2_buy_t_plus_3",
+                "execution_effective_date_proxy": row_buy_effective_date or decision_date,
+                "period_type": period_type,
+                "is_rebalance_month": 1 if rebalance_flag else 0,
+                "rebalance_frequency": config.portfolio.rebalance_frequency,
+                "portfolio_generation_mode": "rebalance_new" if rebalance_flag else "carry_forward",
                 "portfolio_return_gross": round(gross_return, 6),
                 "portfolio_return_net": round(net_return, 6),
                 "benchmark_return": round(benchmark_return, 6),
@@ -469,9 +502,16 @@ def _run_backtest_monthly_legacy(
     backtest_rows = []
     position_audit_rows = []
     previous_weights: dict[str, float] = {}
+    monthly_portfolio_trajectory = build_portfolio_trajectory(config, score_rows, months=months)
+    portfolio_by_month: dict[str, list[dict[str, object]]] = defaultdict(list)
+    source_signal_month_by_month: dict[str, str] = {}
+    for row in monthly_portfolio_trajectory:
+        month = str(row.get("month") or "")
+        portfolio_by_month[month].append(row)
+        source_signal_month_by_month[month] = str(row.get("source_signal_month") or "")
     for current_month, next_month in zip(months, months[1:]):
-        current_scores = scores_by_month.get(current_month, [])
-        portfolio = build_portfolio(config, current_scores)
+        portfolio = portfolio_by_month.get(current_month, [])
+        rebalance_flag = is_rebalance_month(current_month, config.portfolio.rebalance_frequency)
         execution_request_date = month_start(next_month)
         execution_effective_date = execution_request_date
         gross_return = 0.0
@@ -508,15 +548,21 @@ def _run_backtest_monthly_legacy(
                 }
             )
         turnover = _turnover(previous_weights, current_weights)
+        if not rebalance_flag:
+            turnover = 0.0
         cost = turnover * (config.backtest.transaction_cost_bps / 10000.0)
         net_return = gross_return - cost
         return_validity = _classify_month_return_validity(len(portfolio), missing_position_count)
         backtest_rows.append(
             {
                 "signal_month": current_month,
+                "source_signal_month": source_signal_month_by_month.get(current_month, current_month),
                 "execution_month": next_month,
                 "execution_request_date_proxy": execution_request_date,
                 "execution_effective_date_proxy": execution_effective_date,
+                "is_rebalance_month": 1 if rebalance_flag else 0,
+                "rebalance_frequency": config.portfolio.rebalance_frequency,
+                "portfolio_generation_mode": "rebalance_new" if rebalance_flag else "carry_forward",
                 "portfolio_return_gross": round(gross_return, 6),
                 "portfolio_return_net": round(net_return, 6),
                 "benchmark_return": round(benchmark_return, 6),

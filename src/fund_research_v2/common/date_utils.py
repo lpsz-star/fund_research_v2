@@ -68,6 +68,15 @@ def iter_months(start_month: str, end_month: str) -> list[str]:
     return months
 
 
+def is_rebalance_month(month: str, frequency: str) -> bool:
+    """判断某个月是否为当前调仓频率下的正式调仓月。"""
+    if frequency == "monthly":
+        return True
+    if frequency == "quarterly":
+        return month[5:7] in {"03", "06", "09", "12"}
+    raise ValueError(f"不支持的 rebalance_frequency: {frequency}")
+
+
 def is_available_by_month_end(available_date: str, signal_month: str) -> bool:
     """判断一条记录在某个信号月月末之前是否已经可见。"""
     # 可得性边界统一收敛为“信号月月末”，避免不同模块各自解释 available_date。

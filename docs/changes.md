@@ -2,6 +2,66 @@
 
 本文档按主题记录已经落地的主要改动，重点说明“改了什么”以及“为什么改”。
 
+## 2026-04-08
+
+### 1. 新增季度调仓候选配置与显式调仓频率开关
+
+- 变更内容：
+  - `PortfolioConfig` 新增 `rebalance_frequency`，当前支持 `monthly | quarterly`，默认仍为 `monthly`。
+  - `common/date_utils.py` 新增调仓月判定工具，季度口径固定使用自然季度末 `3/6/9/12` 月。
+  - 新增季度候选配置 [`configs/candidates/tushare_scoring_v5_quarterly_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_quarterly_candidate.json)。
+- 目的：
+  - 把“月评季调”做成显式、可审计、可回放的配置能力，而不是把季度调仓逻辑散落在代码里硬编码。
+  - 保持默认 baseline 的月调仓口径不变，只通过候选配置单独验证季度调仓效果。
+
+### 2. 组合层从“最新一期组合”升级为“月度组合轨迹”
+
+- 变更内容：
+  - `portfolio/construction.py` 新增统一的 `build_portfolio_trajectory()`，由它负责生成逐月组合轨迹。
+  - 季度调仓下，季度月按当月评分新建组合；非季度月沿用最近一次季度调仓组合，不重新选基。
+  - [`portfolio_target_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/portfolio_target_monthly.csv) 不再只保存最新一期组合，而是保存完整月度组合轨迹。
+  - 轨迹行新增 `source_signal_month`、`is_rebalance_month`、`rebalance_frequency`、`portfolio_generation_mode`。
+  - [`portfolio_snapshot.json`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/portfolio_snapshot.json) 仍只代表最新正式研究月的当前建议组合。
+- 目的：
+  - 让组合、回测、稳健性分析共享同一套调仓语义，避免多个模块各自实现季度 carry-forward 逻辑。
+  - 让“每个月实际执行的持仓”和“最新月当前建议组合”这两个概念正式分离并各自可审计。
+
+### 3. 回测层接入季度 carry-forward 语义
+
+- 变更内容：
+  - 回测引擎改为优先消费统一的月度组合轨迹，而不是默认每个月都重新按评分建组合。
+  - 季度调仓下，非调仓月只做持仓延续，不发生真实换仓，`turnover=0`、`transaction_cost=0`。
+  - 月频与日频两条回测路径都新增 `source_signal_month`、`is_rebalance_month`、`rebalance_frequency`、`portfolio_generation_mode` 字段。
+  - 非调仓月在日频执行代理下标记为 `carry_forward_no_rebalance`，仍逐月产出回测记录。
+- 目的：
+  - 确保季度调仓不是“只改组合页展示”，而是回测执行层真的不在非季度月重复换仓和重复计成本。
+  - 保持月度回测时间序列完整，便于和原月调仓结果做逐月对照分析。
+
+### 4. 工作流、稳健性与 Web 页面同步适配季度轨迹
+
+- 变更内容：
+  - `run-portfolio`、`run-experiment`、`write_portfolio_outputs()` 全部改为基于月度组合轨迹输出结果。
+  - 稳健性分析不再自己逐月重建组合，而是复用统一的轨迹构造函数。
+  - Web 组合页改为按 `portfolio_snapshot.latest_month` 过滤 [`portfolio_target_monthly.csv`](/Users/liupeng/.codex/projects/fund_research_v2/outputs/tushare/result/portfolio_target_monthly.csv)，避免把全历史持仓整表展示出来。
+  - 基金池、特征、评分月表输出增加 `is_rebalance_month` 与 `rebalance_frequency` 标记。
+- 目的：
+  - 保证研究主链路、验证模块与浏览器展示层看到的是同一套季度调仓语义。
+  - 避免引入季度轨迹后，网站和稳健性模块继续按“每月新建组合”的旧口径解释结果。
+
+### 5. 补齐季度调仓文档与回归测试
+
+- 变更内容：
+  - 更新 [`README.md`](/Users/liupeng/.codex/projects/fund_research_v2/README.md)、[`backtest_conventions.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/backtest_conventions.md)、[`data_contracts.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md)、[`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md)。
+  - 新增并通过回归测试，覆盖：
+    - `rebalance_frequency=quarterly` 配置加载与校验
+    - 组合轨迹在非季度月正确 carry-forward
+    - 回测在非季度月 `turnover=0`、`transaction_cost=0`
+    - `portfolio_target_monthly.csv` 写全历史轨迹但快照仍只保留最新月
+    - Web 组合页只展示 `latest_month` 对应持仓
+- 目的：
+  - 让季度调仓变更在文档、测试和产物层同时闭环，避免只有代码改动而缺少长期协作证据。
+  - 明确这次改动影响历史结果可比性，应作为新的候选研究口径单独评估，而不是静默替换月调仓 baseline。
+
 ## 2026-04-02
 
 ### 1. 新增增量因子研究结论表
@@ -654,5 +714,4 @@
   - [`data_contracts.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md) 与 [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md) 同步补充新产物说明。
 - 目的：
   - 让现有单因子评价不再只是统计展示，而是能直接支撑因子准入、观察层保留和淘汰判断。
-
 

@@ -303,6 +303,7 @@ def render_portfolio_page(repository: OutputRepository) -> tuple[str, str]:
         )
         return "200 OK", render_page("Portfolio", repository, body)
     latest_month = str(snapshot.get("latest_month", ""))
+    latest_target_rows = [row for row in target_rows if str(row.get("month", "")) == latest_month]
     score_preview = [row for row in score_rows if str(row.get("month", "")) == latest_month][:12]
     body = [
         "<section class='hero'>",
@@ -312,6 +313,7 @@ def render_portfolio_page(repository: OutputRepository) -> tuple[str, str]:
         "</section>",
         "<section class='grid four metrics'>",
         render_metric_card("Latest Month", latest_month),
+        render_metric_card("Signal Month", snapshot.get("portfolio", [{}])[0].get("source_signal_month", latest_month) if snapshot.get("portfolio") else latest_month),
         render_metric_card("Eligible Count", snapshot.get("eligible_count")),
         render_metric_card("Portfolio Size", snapshot.get("portfolio_size")),
         render_metric_card("Benchmark", snapshot.get("benchmark_name")),
@@ -325,10 +327,12 @@ def render_portfolio_page(repository: OutputRepository) -> tuple[str, str]:
                     "fund_company": row.get("fund_company", ""),
                     "target_weight": format_ratio(row.get("target_weight")),
                     "total_score": format_decimal(row.get("total_score")),
+                    "source_signal_month": row.get("source_signal_month", ""),
+                    "mode": row.get("portfolio_generation_mode", ""),
                 }
-                for row in target_rows
+                for row in latest_target_rows
             ],
-            ["rank", "entity_name", "fund_company", "target_weight", "total_score"],
+            ["rank", "entity_name", "fund_company", "target_weight", "total_score", "source_signal_month", "mode"],
             "No portfolio rows available.",
         ),
         render_table(

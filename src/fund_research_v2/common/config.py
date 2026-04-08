@@ -35,6 +35,7 @@ class PortfolioConfig:
     weighting_method: str
     single_fund_cap: float
     single_company_max: int
+    rebalance_frequency: str
 
 
 @dataclass(frozen=True)
@@ -182,6 +183,7 @@ def load_config(path: Path) -> AppConfig:
             weighting_method=raw["portfolio"].get("weighting_method", "equal_weight"),
             single_fund_cap=float(raw["portfolio"]["single_fund_cap"]),
             single_company_max=int(raw["portfolio"]["single_company_max"]),
+            rebalance_frequency=raw["portfolio"].get("rebalance_frequency", "monthly"),
         ),
         backtest=BacktestConfig(
             start_month=raw["backtest"].get("start_month"),
@@ -233,6 +235,8 @@ def _validate(config: AppConfig) -> None:
         raise ValueError("tushare.request_pause_ms 不能小于 0。")
     if config.tushare.progress_every_entities <= 0:
         raise ValueError("tushare.progress_every_entities 必须大于 0。")
+    if config.portfolio.rebalance_frequency not in {"monthly", "quarterly"}:
+        raise ValueError("portfolio.rebalance_frequency 必须是 monthly 或 quarterly。")
     if not config.benchmark.series:
         raise ValueError("benchmark.series 不能为空。")
     if config.benchmark.default_key not in config.benchmark.series:

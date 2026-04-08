@@ -13,7 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from fund_research_v2.backtest.engine import prepare_backtest_execution_cache, run_backtest
 from fund_research_v2.cli import main
 from fund_research_v2.common.config import load_config
-from fund_research_v2.common.date_utils import add_months, decision_date_for_month, is_available_by_decision_date, is_available_by_month_end, iter_months, latest_completed_month, month_end, month_start
+from fund_research_v2.common.date_utils import add_months, decision_date_for_month, is_available_by_decision_date, is_available_by_month_end, is_rebalance_month, iter_months, latest_completed_month, month_end, month_start
 from fund_research_v2.common.io_utils import read_csv
 from fund_research_v2.common.workflows import analyze_robustness_command, candidate_validation_dir, compare_experiments_command, comparison_dir, factor_evaluation_dir, fetch_failed_command, prepare_bundle, robustness_dir, run_experiment_command, run_portfolio_command, run_universe_command, validate_baseline_candidate_command
 from fund_research_v2.data_ingestion.providers import DatasetSnapshot, load_cached_dataset
@@ -24,7 +24,7 @@ from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
 from fund_research_v2.evaluation.metrics import summarize_backtest
 from fund_research_v2.evaluation.robustness import default_baseline_config_path
 from fund_research_v2.features.feature_builder import build_feature_rows
-from fund_research_v2.portfolio.construction import build_portfolio
+from fund_research_v2.portfolio.construction import build_portfolio, build_portfolio_trajectory
 from fund_research_v2.ranking.scoring_engine import score_funds
 from fund_research_v2.reporting.reports import render_universe_audit_report
 from fund_research_v2.universe.filters import build_universe
@@ -1334,6 +1334,52 @@ class PipelineTest(unittest.TestCase):
         self.assertLessEqual(sum(float(row["target_weight"]) for row in portfolio), 1.0)
         self.assertTrue(all(float(row["target_weight"]) <= load_config(config_path).portfolio.single_fund_cap for row in portfolio))
 
+    def test_quarterly_rebalance_frequency_loads_and_validates(self) -> None:
+        """验证配置可显式启用季度调仓，并拒绝非法频率值。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["portfolio"]["rebalance_frequency"] = "quarterly"
+
+        config = load_config(self._write_config(root, config_payload))
+
+        self.assertEqual(config.portfolio.rebalance_frequency, "quarterly")
+        self.assertTrue(is_rebalance_month("2026-03", "quarterly"))
+        self.assertFalse(is_rebalance_month("2026-04", "quarterly"))
+
+        invalid_payload = self._base_config(root)
+        invalid_payload["portfolio"]["rebalance_frequency"] = "weekly"
+        with self.assertRaisesRegex(ValueError, "rebalance_frequency"):
+            load_config(self._write_config(root, invalid_payload))
+
+    def test_build_portfolio_trajectory_carries_forward_on_non_rebalance_months(self) -> None:
+        """验证季度调仓下，非季度月沿用最近一次季度组合，而不是重新选基。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["portfolio"]["portfolio_size"] = 1
+        config_payload["portfolio"]["single_fund_cap"] = 1.0
+        config_payload["portfolio"]["single_company_max"] = 1
+        config_payload["portfolio"]["rebalance_frequency"] = "quarterly"
+        config = load_config(self._write_config(root, config_payload))
+        score_rows = [
+            {"entity_id": "MAR", "month": "2026-03", "entity_name": "三月基金", "fund_company": "甲公司", "rank": 1, "total_score": 1.0},
+            {"entity_id": "APR", "month": "2026-04", "entity_name": "四月基金", "fund_company": "乙公司", "rank": 1, "total_score": 2.0},
+            {"entity_id": "JUN", "month": "2026-06", "entity_name": "六月基金", "fund_company": "丙公司", "rank": 1, "total_score": 3.0},
+        ]
+
+        rows = build_portfolio_trajectory(config, score_rows, months=["2026-03", "2026-04", "2026-05", "2026-06"])
+        row_map = {str(row["month"]): row for row in rows}
+
+        self.assertEqual(str(row_map["2026-03"]["entity_id"]), "MAR")
+        self.assertEqual(str(row_map["2026-03"]["portfolio_generation_mode"]), "rebalance_new")
+        self.assertEqual(str(row_map["2026-04"]["entity_id"]), "MAR")
+        self.assertEqual(str(row_map["2026-04"]["source_signal_month"]), "2026-03")
+        self.assertEqual(str(row_map["2026-04"]["portfolio_generation_mode"]), "carry_forward")
+        self.assertEqual(str(row_map["2026-05"]["entity_id"]), "MAR")
+        self.assertEqual(str(row_map["2026-06"]["entity_id"]), "JUN")
+        self.assertEqual(str(row_map["2026-06"]["source_signal_month"]), "2026-06")
+
     def test_backtest_respects_next_month_execution(self) -> None:
         """验证回测严格按“当月信号、下月执行”的时间规则运行。"""
         root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
@@ -1540,6 +1586,63 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(float(rows[1]["turnover"]), 0.15)
         self.assertEqual(str(rows[1]["return_validity"]), "empty_portfolio")
         self.assertEqual(float(rows[1]["missing_weight"]), 0.0)
+
+    def test_backtest_quarterly_carry_forward_month_has_zero_turnover_and_cost(self) -> None:
+        """验证季度调仓下的非调仓月只延续持仓，不重复计算换手和交易成本。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["portfolio"]["rebalance_frequency"] = "quarterly"
+        config_payload["portfolio"]["portfolio_size"] = 1
+        config_payload["portfolio"]["single_fund_cap"] = 1.0
+        config_payload["portfolio"]["single_company_max"] = 1
+        config_payload["backtest"]["start_month"] = "2026-03"
+        config_payload["backtest"]["end_month"] = "2026-05"
+        config_payload["backtest"]["transaction_cost_bps"] = 10.0
+        config = load_config(self._write_config(root, config_payload))
+        score_rows = [
+            {"entity_id": "MAR", "month": "2026-03", "entity_name": "三月基金", "fund_company": "甲公司", "rank": 1, "total_score": 1.0},
+            {"entity_id": "APR", "month": "2026-04", "entity_name": "四月基金", "fund_company": "乙公司", "rank": 1, "total_score": 2.0},
+        ]
+        nav_rows = [
+            {"entity_id": "MAR", "month": "2026-04", "return_1m": 0.05},
+            {"entity_id": "MAR", "month": "2026-05", "return_1m": 0.02},
+            {"entity_id": "APR", "month": "2026-05", "return_1m": 0.09},
+        ]
+        benchmark_rows = [
+            {"month": "2026-03", "benchmark_return_1m": 0.0},
+            {"month": "2026-04", "benchmark_return_1m": 0.0},
+            {"month": "2026-05", "benchmark_return_1m": 0.0},
+        ]
+
+        rows, _ = run_backtest(config, score_rows, nav_rows, benchmark_rows)
+
+        self.assertEqual([str(row["signal_month"]) for row in rows], ["2026-03", "2026-04"])
+        self.assertEqual(int(rows[0]["is_rebalance_month"]), 1)
+        self.assertEqual(int(rows[1]["is_rebalance_month"]), 0)
+        self.assertEqual(str(rows[1]["source_signal_month"]), "2026-03")
+        self.assertEqual(str(rows[1]["portfolio_generation_mode"]), "carry_forward")
+        self.assertEqual(float(rows[0]["turnover"]), 0.5)
+        self.assertEqual(float(rows[1]["turnover"]), 0.0)
+        self.assertEqual(float(rows[1]["transaction_cost"]), 0.0)
+        self.assertAlmostEqual(float(rows[1]["portfolio_return_gross"]), 0.02, places=6)
+
+    def test_run_portfolio_writes_monthly_portfolio_trajectory_but_snapshot_stays_latest_month(self) -> None:
+        """验证组合 CSV 写全历史轨迹，但快照 JSON 仍只代表最新正式月建议。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["portfolio"]["rebalance_frequency"] = "quarterly"
+        config_path = self._write_config(root, config_payload)
+
+        run_portfolio_command(config_path)
+
+        portfolio_rows = read_csv(self._scoped_output_dir(root, "sample", "result") / "portfolio_target_monthly.csv")
+        snapshot = json.loads((self._scoped_output_dir(root, "sample", "result") / "portfolio_snapshot.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(len({str(row["month"]) for row in portfolio_rows}) > 1)
+        self.assertEqual(snapshot["latest_month"], "2026-02")
+        self.assertEqual({str(row["month"]) for row in snapshot["portfolio"]}, {"2026-02"})
 
     def test_backtest_records_missing_return_audit_fields(self) -> None:
         """验证持有期缺失收益会被显式记录到月度回测表和持仓审计表。"""
