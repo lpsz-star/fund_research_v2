@@ -127,6 +127,7 @@
 - `portfolio_snapshot.json`
 - `backtest_monthly.csv`
 - `backtest_summary.json`
+- `incremental_merge_summary.json`
 
 其中：
 
@@ -138,6 +139,8 @@
 - `backtest_monthly.csv`
   - 即使季度调仓，也仍逐月输出
   - 会新增 `source_signal_month`、`is_rebalance_month`、`rebalance_frequency`、`portfolio_generation_mode`
+- `incremental_merge_summary.json`
+  - 记录某次月份增量 merge 的目标月份、抓取窗口、各表 upsert 统计和覆盖率重建结果
 
 ### 2.5 `outputs/<data_source>/experiments`
 

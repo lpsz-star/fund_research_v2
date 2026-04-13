@@ -332,6 +332,7 @@ PYTHONPATH=src python3 -m fund_research_v2 serve-web --config configs/default.js
 make help
 make test
 make fetch-failed-tushare
+make merge-tushare-incremental TARGET_MONTH=2026-03
 make compare-sample
 make compare-tushare
 make run-sample
@@ -387,12 +388,14 @@ make help
 ```bash
 make fetch-sample
 make fetch-tushare
+make merge-tushare-incremental TARGET_MONTH=2026-03
 ```
 
 说明：
 
 - 当 `data_source=sample` 时，会生成样例数据并写入原始层
 - 当 `data_source=tushare` 时，会读取本地 token 并尝试抓取真实数据
+- `merge-tushare-incremental` 会先抓目标月的安全重叠窗口，再按主键 upsert 合并回主 `data/raw/tushare`
 
 ### 7.2 只构建基金池
 

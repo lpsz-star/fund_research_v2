@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .DS_Store
 data/raw/
+data/raw_incremental/
 outputs/
 docs/roadmap.md
 .vscode/settings.json

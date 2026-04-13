@@ -51,6 +51,25 @@ def fetch_and_cache_dataset(config: AppConfig, project_root: Path) -> DatasetSna
     return dataset
 
 
+def fetch_incremental_dataset(
+    config: AppConfig,
+    project_root: Path,
+    base_dataset: DatasetSnapshot,
+    *,
+    target_month: str,
+    window_start: str,
+    window_end: str,
+) -> DatasetSnapshot:
+    """基于主 raw 已有份额映射，定向抓取目标月份增量窗口。"""
+    if config.data_source != "tushare":
+        raise RuntimeError("仅 tushare 数据源支持月份增量抓取。")
+    token = _load_tushare_token(project_root / config.local_secret_path)
+    provider = TushareDataProvider(config, token, project_root)
+    dataset = provider.fetch_incremental(base_dataset, target_month=target_month, window_start=window_start, window_end=window_end)
+    persist_dataset(config, project_root, dataset)
+    return dataset
+
+
 def warm_failed_api_cache(config: AppConfig, project_root: Path) -> dict[str, object]:
     """只针对上一次失败的 ts_code 预热单接口缓存，不重写整份 raw 快照。"""
     if config.data_source != "tushare":
@@ -613,6 +632,163 @@ class TushareDataProvider:
                 error_message=str(exc),
             )
             raise
+
+    def fetch_incremental(
+        self,
+        base_dataset: DatasetSnapshot,
+        *,
+        target_month: str,
+        window_start: str,
+        window_end: str,
+    ) -> DatasetSnapshot:
+        """基于主 raw 已知份额集合定向抓取时间序列增量，不再重新发现基金全集。"""
+        fetch_started_at = time.monotonic()
+        trade_calendar_rows = self._fetch_trade_calendar_rows_for_config()
+        entity_rows = [dict(row) for row in base_dataset.fund_entity_master]
+        share_class_map = [dict(row) for row in base_dataset.fund_share_class_map]
+        fund_type_audit_rows = [dict(row) for row in base_dataset.fund_type_audit]
+        fund_liquidity_audit_rows = [dict(row) for row in base_dataset.fund_liquidity_audit]
+        share_class_name_lookup = {
+            (str(row.get("entity_id") or ""), str(row.get("share_class_id") or "")): str(row.get("share_class_name") or row.get("share_class_id") or "")
+            for row in share_class_map
+        }
+        representative_lookup = _representative_share_class_lookup(share_class_map, entity_rows)
+        share_classes_by_entity: dict[str, list[dict[str, object]]] = defaultdict(list)
+        for row in share_class_map:
+            entity_id = str(row.get("entity_id") or "")
+            share_class_id = str(row.get("share_class_id") or "")
+            if not entity_id or not share_class_id:
+                continue
+            share_classes_by_entity[entity_id].append(
+                {
+                    "ts_code": share_class_id,
+                    "name": share_class_name_lookup.get((entity_id, share_class_id), share_class_id),
+                    "status": "L",
+                }
+            )
+        nav_rows: list[dict[str, object]] = []
+        nav_daily_rows: list[dict[str, object]] = []
+        manager_rows: list[dict[str, object]] = []
+        total_entities = len(share_classes_by_entity)
+        self._write_fetch_progress(
+            status="running",
+            processed_entities=0,
+            total_entities=total_entities,
+            retained_entities=0,
+            dropped_entities=0,
+            nav_rows=0,
+            manager_rows=0,
+            selected_share_class_count=len(share_class_map),
+            last_entity_id="",
+            runtime_seconds=round(time.monotonic() - fetch_started_at, 3),
+        )
+        for index, entity_id in enumerate(sorted(share_classes_by_entity), start=1):
+            share_rows = share_classes_by_entity[entity_id]
+            representative_share_class_id = representative_lookup.get(entity_id) or str(share_rows[0]["ts_code"])
+            latest_assets, entity_daily_nav_rows, entity_nav_rows = self._fetch_entity_monthly_nav_rows(share_rows, entity_id, trade_calendar_rows)
+            if entity_nav_rows:
+                nav_rows.extend(entity_nav_rows)
+                nav_daily_rows.extend(entity_daily_nav_rows)
+                manager_rows.extend(self._build_manager_assignment_rows(representative_share_class_id, entity_id, entity_nav_rows))
+            if index % self.config.tushare.progress_every_entities == 0 or index == total_entities:
+                self._write_fetch_progress(
+                    status="running",
+                    processed_entities=index,
+                    total_entities=total_entities,
+                    retained_entities=index,
+                    dropped_entities=0,
+                    nav_rows=len(nav_rows),
+                    manager_rows=len(manager_rows),
+                    selected_share_class_count=len(share_class_map),
+                    last_entity_id=entity_id,
+                    runtime_seconds=round(time.monotonic() - fetch_started_at, 3),
+                )
+        month_set = sorted({str(row["month"]) for row in nav_rows})
+        daily_coverage_rows = build_daily_nav_coverage_monthly(
+            nav_monthly_rows=nav_rows,
+            nav_daily_rows=nav_daily_rows,
+            trade_calendar_rows=trade_calendar_rows,
+            lookback_months=self.config.universe.daily_nav_coverage_lookback_months,
+        )
+        benchmark_rows = self._fetch_benchmark_rows(month_set)
+        metadata = {
+            "source_name": "tushare",
+            "generated_at": current_timestamp(),
+            "entity_count": len(entity_rows),
+            "share_class_count": len(share_class_map),
+            "requested_max_funds": self.config.tushare.max_funds,
+            "month_range": {
+                "start": month_set[0] if month_set else None,
+                "end": month_set[-1] if month_set else None,
+            },
+            "incremental_fetch": {
+                "target_month": target_month,
+                "window_start": window_start,
+                "window_end": window_end,
+                "mode": "existing_share_classes_only",
+            },
+            "field_status": dict(base_dataset.metadata.get("field_status", {})) if isinstance(base_dataset.metadata.get("field_status"), dict) else {},
+            "benchmark_config": benchmark_to_serializable_dict(self.config.benchmark),
+            "benchmark_name": self.config.benchmark.series_for_key(self.config.benchmark.default_key).name,
+            "benchmark_source": self.config.benchmark.source,
+            "benchmark_ts_code": self.config.benchmark.series_for_key(self.config.benchmark.default_key).ts_code,
+            "benchmark_default_key": self.config.benchmark.default_key,
+            "benchmark_series": {
+                key: {"name": series.name, "ts_code": series.ts_code}
+                for key, series in self.config.benchmark.series.items()
+            },
+            "benchmark_primary_type_map": self.config.benchmark.primary_type_map,
+            "fund_type_audit_summary": base_dataset.metadata.get("fund_type_audit_summary", {}),
+            "fund_liquidity_audit_summary": base_dataset.metadata.get("fund_liquidity_audit_summary", {}),
+            "fetch_diagnostics": {
+                "runtime_seconds": round(time.monotonic() - fetch_started_at, 3),
+                "api_call_stats": self._api_call_stats_snapshot(),
+                "api_cache_stats": self._api_cache_stats_snapshot(),
+                "api_error_samples": self._api_error_samples,
+            },
+            "entity_asset_aggregation": "sum_of_share_classes",
+            "nav_monthly_anchor": "month_last_trading_day",
+            "trade_calendar": {
+                "source": "tushare_trade_cal",
+                "exchange": "SSE",
+                "start_date": trade_calendar_rows[0]["cal_date"] if trade_calendar_rows else "",
+                "end_date": trade_calendar_rows[-1]["cal_date"] if trade_calendar_rows else "",
+                "open_day_count": sum(int(str(row.get("is_open") or "0")) for row in trade_calendar_rows),
+            },
+            "daily_nav_coverage_monthly": {
+                "lookback_months": self.config.universe.daily_nav_coverage_lookback_months,
+                "row_count": len(daily_coverage_rows),
+                "source": "precomputed_from_fund_nav_pit_daily",
+            },
+        }
+        self._write_fetch_progress(
+            status="completed",
+            processed_entities=total_entities,
+            total_entities=total_entities,
+            retained_entities=total_entities,
+            dropped_entities=0,
+            nav_rows=len(nav_rows),
+            manager_rows=len(manager_rows),
+            selected_share_class_count=len(share_class_map),
+            last_entity_id="",
+            runtime_seconds=round(time.monotonic() - fetch_started_at, 3),
+            entity_count=len(entity_rows),
+            share_class_count=len(share_class_map),
+            month_range=metadata["month_range"],
+        )
+        return DatasetSnapshot(
+            fund_entity_master=entity_rows,
+            fund_share_class_map=share_class_map,
+            fund_nav_monthly=nav_rows,
+            fund_nav_pit_daily=nav_daily_rows,
+            benchmark_monthly=benchmark_rows,
+            manager_assignment_monthly=manager_rows,
+            fund_type_audit=fund_type_audit_rows,
+            fund_liquidity_audit=fund_liquidity_audit_rows,
+            trade_calendar=trade_calendar_rows,
+            fund_nav_daily_coverage_monthly=daily_coverage_rows,
+            metadata=metadata,
+        )
 
     def warm_api_cache_for_ts_codes(self, ts_codes: list[str]) -> dict[str, object]:
         """只为指定失败份额补抓单接口缓存，供后续全量流程复用。"""
@@ -1254,6 +1430,23 @@ def _group_share_classes(rows: list[dict[str, object]]) -> dict[str, list[dict[s
         entity_id = f"{management}::{entity_name}"
         grouped[entity_id].append(row)
     return grouped
+
+
+def _representative_share_class_lookup(
+    share_rows: list[dict[str, object]],
+    entity_rows: list[dict[str, object]],
+) -> dict[str, str]:
+    """优先从 share map 读取主份额，缺失时回退到实体主表中的代表份额。"""
+    lookup = {
+        str(row.get("entity_id") or ""): str(row.get("share_class_id") or "")
+        for row in share_rows
+        if int(str(row.get("is_primary_share_class") or "0")) == 1 and str(row.get("entity_id") or "").strip()
+    }
+    for row in entity_rows:
+        entity_id = str(row.get("entity_id") or "")
+        if entity_id and entity_id not in lookup and str(row.get("representative_share_class_id") or "").strip():
+            lookup[entity_id] = str(row.get("representative_share_class_id") or "")
+    return lookup
 
 
 def _select_representative_share_class(rows: list[dict[str, object]]) -> dict[str, object]:

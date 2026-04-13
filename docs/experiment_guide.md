@@ -45,6 +45,20 @@ make run-tushare
 
 这一步的目的不是直接生成完整 clean/result 产物，而是先把上次失败的单接口缓存补齐，避免下一次全量实验再次从零联网重抓。
 
+如果你要把某个月份的增量源数据正式合并回主 raw 快照，当前标准命令是：
+
+```bash
+make merge-tushare-incremental TARGET_MONTH=2026-03
+```
+
+它会：
+
+- 自动把抓取窗口扩成“前一月 + 目标月”，避免收益链路缺少前值
+- 先抓到临时 raw 目录
+- 再按主键 upsert 回 `data/raw/tushare`
+- 重建 `fund_nav_daily_coverage_monthly`
+- 写出 `incremental_merge_summary.json`
+
 对应最常用 CLI：
 
 ```bash

@@ -2,6 +2,21 @@
 
 本文档按主题记录已经落地的主要改动，重点说明“改了什么”以及“为什么改”。
 
+## 2026-04-13
+
+### 1. 新增 tushare 月份增量 merge 工作流
+
+- 变更内容：
+  - 新增 `merge-incremental` CLI 与 `make merge-tushare-incremental TARGET_MONTH=YYYY-MM`。
+  - 工作流会先按“前一月 + 目标月”的安全窗口抓取临时增量 raw，再按主键 upsert 回主 `data/raw/tushare`。
+  - `fund_entity_master`、`fund_nav_monthly`、`fund_nav_pit_daily`、`manager_assignment_monthly`、`benchmark_monthly`、`trade_calendar` 等主表已纳入 merge 规则。
+  - `fund_nav_daily_coverage_monthly` 不再直接 merge，而是基于 merge 后主 raw 全量重建。
+  - `api_cache` 会从临时 raw 并回主 raw，merge 结果会写出 `incremental_merge_summary.json`。
+  - 新增回归测试，覆盖窗口推导、主键 upsert、coverage 重建、CLI 分发与 workflow 落盘。
+- 目的：
+  - 让“把某个月份新增源数据合并回主缓存”从手工追加 csv 变成正式、可审计、可复用的 raw 维护能力。
+  - 避免简单 append 破坏主键唯一性、收益前值链路和覆盖率衍生表口径。
+
 ## 2026-04-08
 
 ### 1. 新增季度调仓候选配置与显式调仓频率开关
@@ -714,4 +729,3 @@
   - [`data_contracts.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md) 与 [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md) 同步补充新产物说明。
 - 目的：
   - 让现有单因子评价不再只是统计展示，而是能直接支撑因子准入、观察层保留和淘汰判断。
-

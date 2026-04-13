@@ -12,6 +12,7 @@ help:
 	"  make fetch-sample         生成 sample 原始数据缓存" \
 	"  make fetch-tushare        拉取 tushare 原始数据缓存" \
 	"  make fetch-failed-tushare 仅重抓上次失败的 tushare 份额接口缓存" \
+	"  make merge-tushare-incremental TARGET_MONTH=YYYY-MM 合并某个月的 tushare 增量源数据" \
 	"  make compare-sample       对比 sample 最近两次完整实验" \
 	"  make compare-tushare      对比 tushare 最近两次完整实验" \
 	"  make run-tushare-candidate 运行当前 tushare 正式候选完整实验" \
@@ -52,6 +53,11 @@ fetch-tushare:
 .PHONY: fetch-failed-tushare
 fetch-failed-tushare:
 	$(PYTHON) $(APP) fetch-failed --config $(TUSHARE_CONFIG)
+
+.PHONY: merge-tushare-incremental
+merge-tushare-incremental:
+	@if [ -z "$(TARGET_MONTH)" ]; then echo "请提供 TARGET_MONTH=YYYY-MM"; exit 1; fi
+	$(PYTHON) $(APP) merge-incremental --config $(TUSHARE_CONFIG) --target-month $(TARGET_MONTH)
 
 .PHONY: compare-sample
 compare-sample:

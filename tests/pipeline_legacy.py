@@ -15,9 +15,9 @@ from fund_research_v2.cli import main
 from fund_research_v2.common.config import load_config
 from fund_research_v2.common.date_utils import add_months, decision_date_for_month, is_available_by_decision_date, is_available_by_month_end, is_rebalance_month, iter_months, latest_completed_month, month_end, month_start
 from fund_research_v2.common.io_utils import read_csv
-from fund_research_v2.common.workflows import analyze_robustness_command, candidate_validation_dir, compare_experiments_command, comparison_dir, factor_evaluation_dir, fetch_failed_command, prepare_bundle, robustness_dir, run_experiment_command, run_portfolio_command, run_universe_command, validate_baseline_candidate_command
-from fund_research_v2.data_ingestion.providers import DatasetSnapshot, load_cached_dataset
-from fund_research_v2.data_ingestion.providers import TushareDataProvider
+from fund_research_v2.common.workflows import analyze_robustness_command, candidate_validation_dir, compare_experiments_command, comparison_dir, factor_evaluation_dir, fetch_failed_command, merge_incremental_command, prepare_bundle, robustness_dir, run_experiment_command, run_portfolio_command, run_universe_command, validate_baseline_candidate_command
+from fund_research_v2.data_ingestion.providers import DatasetSnapshot, TushareDataProvider, load_cached_dataset, persist_dataset
+from fund_research_v2.data_ingestion.raw_merger import incremental_window_for_target_month, merge_tushare_incremental_snapshot
 from fund_research_v2.data_processing.fund_liquidity_classifier import classify_fund_liquidity
 from fund_research_v2.data_processing.fund_type_classifier import classify_fund_type
 from fund_research_v2.evaluation.factor_evaluator import evaluate_factors
@@ -527,6 +527,19 @@ class PipelineTest(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         mocked_command.assert_called_once_with(Path("configs/default.json"))
+
+    def test_cli_dispatches_merge_incremental_command(self) -> None:
+        """验证 CLI 已暴露月份增量 merge 入口。"""
+        with mock.patch("fund_research_v2.cli.merge_incremental_command") as mocked_command:
+            with mock.patch.object(
+                sys,
+                "argv",
+                ["fund_research_v2", "merge-incremental", "--config", "configs/tushare.json", "--target-month", "2026-03"],
+            ):
+                exit_code = main()
+
+        self.assertEqual(exit_code, 0)
+        mocked_command.assert_called_once_with(Path("configs/tushare.json"), "2026-03")
 
     def test_run_universe_writes_audit_report(self) -> None:
         """验证只跑基金池时仍会输出可审计报告，而不是只留下裸 CSV。"""
@@ -2277,6 +2290,255 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(progress["requested_max_funds"], 2)
         self.assertEqual(progress["entity_count"], len(dataset.fund_entity_master))
         self.assertEqual(progress["share_class_count"], len(dataset.fund_share_class_map))
+
+    def test_incremental_window_for_target_month_uses_previous_month_overlap(self) -> None:
+        """验证月份增量窗口默认带上前一个月，避免收益链路缺失前值。"""
+        self.assertEqual(incremental_window_for_target_month("2026-03"), ("2026-02-01", "2026-03-31"))
+
+    def test_merge_tushare_incremental_snapshot_upserts_rows_and_rebuilds_coverage(self) -> None:
+        """验证 raw merge 对主表做 upsert，并在 merge 后重建覆盖率月表。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["data_source"] = "tushare"
+        config_payload["universe"]["daily_nav_coverage_lookback_months"] = 2
+        config = load_config(self._write_config(root, config_payload))
+        primary_dataset = DatasetSnapshot(
+            fund_entity_master=[{"entity_id": "E1", "entity_name": "基金甲", "primary_type": "主动股票"}],
+            fund_share_class_map=[{"entity_id": "E1", "share_class_id": "000001.OF", "share_class_name": "基金甲A", "is_primary_share_class": 1}],
+            fund_nav_monthly=[
+                {"entity_id": "E1", "month": "2026-02", "nav_date": "2026-02-27", "available_date": "2026-02-28", "nav": 1.0, "return_1m": 0.01, "assets_cny_mn": 100.0},
+                {"entity_id": "E1", "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-04-01", "nav": 1.02, "return_1m": 0.02, "assets_cny_mn": 101.0},
+            ],
+            benchmark_monthly=[
+                {"month": "2026-02", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.01},
+                {"month": "2026-03", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.02},
+            ],
+            manager_assignment_monthly=[{"entity_id": "E1", "month": "2026-03", "manager_name": "经理旧", "manager_start_month": "2025-01"}],
+            fund_type_audit=[{"entity_id": "E1", "primary_type": "主动股票", "confidence": "high"}],
+            metadata={"source_name": "tushare", "incremental_merge_history": []},
+            fund_liquidity_audit=[{"entity_id": "E1", "liquidity_restricted": 0, "holding_lock_months": 0, "rule_code": "none"}],
+            trade_calendar=[
+                {"exchange": "SSE", "cal_date": "2026-02-27", "is_open": 1, "pretrade_date": "2026-02-26"},
+                {"exchange": "SSE", "cal_date": "2026-03-02", "is_open": 1, "pretrade_date": "2026-02-27"},
+                {"exchange": "SSE", "cal_date": "2026-03-31", "is_open": 1, "pretrade_date": "2026-03-30"},
+                {"exchange": "SSE", "cal_date": "2026-04-01", "is_open": 1, "pretrade_date": "2026-03-31"},
+            ],
+            fund_nav_pit_daily=[
+                {"entity_id": "E1", "trade_date": "2026-02-27", "available_date": "2026-02-28", "daily_return": 0.01, "assets_cny_mn": 100.0},
+                {"entity_id": "E1", "trade_date": "2026-03-31", "available_date": "2026-04-01", "daily_return": 0.02, "assets_cny_mn": 101.0},
+            ],
+            fund_nav_daily_coverage_monthly=[
+                {"entity_id": "E1", "month": "2026-03", "decision_date": "2026-04-01", "lookback_months": 2, "trailing_daily_nav_coverage_ratio": 0.5, "trailing_daily_nav_coverage_months": 1},
+            ],
+        )
+        incremental_dataset = DatasetSnapshot(
+            fund_entity_master=[
+                {"entity_id": "E1", "entity_name": "基金甲", "primary_type": "主动股票"},
+                {"entity_id": "E2", "entity_name": "基金乙", "primary_type": "偏股混合"},
+            ],
+            fund_share_class_map=[
+                {"entity_id": "E1", "share_class_id": "000001.OF", "share_class_name": "基金甲A", "is_primary_share_class": 1},
+                {"entity_id": "E2", "share_class_id": "000002.OF", "share_class_name": "基金乙A", "is_primary_share_class": 1},
+            ],
+            fund_nav_monthly=[
+                {"entity_id": "E1", "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-04-01", "nav": 1.05, "return_1m": 0.05, "assets_cny_mn": 105.0},
+                {"entity_id": "E2", "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-04-01", "nav": 0.98, "return_1m": -0.02, "assets_cny_mn": 80.0},
+            ],
+            benchmark_monthly=[{"month": "2026-03", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.03}],
+            manager_assignment_monthly=[
+                {"entity_id": "E1", "month": "2026-03", "manager_name": "经理新", "manager_start_month": "2025-06"},
+                {"entity_id": "E2", "month": "2026-03", "manager_name": "经理乙", "manager_start_month": "2024-01"},
+            ],
+            fund_type_audit=[
+                {"entity_id": "E1", "primary_type": "主动股票", "confidence": "high"},
+                {"entity_id": "E2", "primary_type": "偏股混合", "confidence": "high"},
+            ],
+            metadata={"source_name": "tushare"},
+            fund_liquidity_audit=[
+                {"entity_id": "E1", "liquidity_restricted": 0, "holding_lock_months": 0, "rule_code": "none"},
+                {"entity_id": "E2", "liquidity_restricted": 0, "holding_lock_months": 0, "rule_code": "none"},
+            ],
+            trade_calendar=[
+                {"exchange": "SSE", "cal_date": "2026-02-27", "is_open": 1, "pretrade_date": "2026-02-26"},
+                {"exchange": "SSE", "cal_date": "2026-03-02", "is_open": 1, "pretrade_date": "2026-02-27"},
+                {"exchange": "SSE", "cal_date": "2026-03-31", "is_open": 1, "pretrade_date": "2026-03-30"},
+                {"exchange": "SSE", "cal_date": "2026-04-01", "is_open": 1, "pretrade_date": "2026-03-31"},
+            ],
+            fund_nav_pit_daily=[
+                {"entity_id": "E1", "trade_date": "2026-03-31", "available_date": "2026-04-01", "daily_return": 0.05, "assets_cny_mn": 105.0},
+                {"entity_id": "E2", "trade_date": "2026-03-31", "available_date": "2026-04-01", "daily_return": -0.02, "assets_cny_mn": 80.0},
+            ],
+            fund_nav_daily_coverage_monthly=[],
+        )
+
+        merged_dataset, summary = merge_tushare_incremental_snapshot(
+            config=config,
+            primary_dataset=primary_dataset,
+            incremental_dataset=incremental_dataset,
+            target_month="2026-03",
+            window_start="2026-02-01",
+            window_end="2026-03-31",
+            temp_raw_dir=root / "data" / "raw_incremental" / "202603" / "tushare",
+        )
+
+        nav_map = {(str(row["entity_id"]), str(row["month"])): row for row in merged_dataset.fund_nav_monthly}
+        self.assertEqual(float(nav_map[("E1", "2026-03")]["nav"]), 1.05)
+        self.assertIn(("E2", "2026-03"), nav_map)
+        manager_map = {(str(row["entity_id"]), str(row["month"])): row for row in merged_dataset.manager_assignment_monthly}
+        self.assertEqual(str(manager_map[("E1", "2026-03")]["manager_name"]), "经理新")
+        self.assertGreater(len(merged_dataset.fund_nav_daily_coverage_monthly), 0)
+        self.assertEqual(summary["table_stats"]["fund_nav_monthly"]["updated_rows"], 1)
+        self.assertEqual(summary["table_stats"]["fund_nav_monthly"]["inserted_rows"], 1)
+        self.assertEqual(summary["table_stats"]["fund_nav_pit_daily"]["updated_rows"], 1)
+        self.assertEqual(summary["table_stats"]["fund_nav_pit_daily"]["inserted_rows"], 1)
+        self.assertEqual(merged_dataset.metadata["incremental_merge_history"][-1]["target_month"], "2026-03")
+
+    def test_merge_incremental_command_writes_summary_and_updates_primary_raw(self) -> None:
+        """验证增量 merge workflow 会把临时窗口快照 upsert 回主 raw。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["data_source"] = "tushare"
+        config_payload["tushare"]["download_enabled"] = True
+        config_payload["tushare"]["use_cached_raw"] = True
+        config_path = self._write_config(root, config_payload)
+        config = load_config(config_path)
+        primary_dataset = DatasetSnapshot(
+            fund_entity_master=[{"entity_id": "E1", "entity_name": "基金甲", "primary_type": "主动股票"}],
+            fund_share_class_map=[{"entity_id": "E1", "share_class_id": "000001.OF", "share_class_name": "基金甲A", "is_primary_share_class": 1}],
+            fund_nav_monthly=[{"entity_id": "E1", "month": "2026-02", "nav_date": "2026-02-27", "available_date": "2026-02-28", "nav": 1.0, "return_1m": 0.01, "assets_cny_mn": 100.0}],
+            benchmark_monthly=[{"month": "2026-02", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.01}],
+            manager_assignment_monthly=[],
+            fund_type_audit=[{"entity_id": "E1", "primary_type": "主动股票", "confidence": "high"}],
+            metadata={"source_name": "tushare"},
+            fund_liquidity_audit=[{"entity_id": "E1", "liquidity_restricted": 0, "holding_lock_months": 0, "rule_code": "none"}],
+            trade_calendar=[
+                {"exchange": "SSE", "cal_date": "2026-02-27", "is_open": 1, "pretrade_date": "2026-02-26"},
+                {"exchange": "SSE", "cal_date": "2026-03-31", "is_open": 1, "pretrade_date": "2026-03-30"},
+                {"exchange": "SSE", "cal_date": "2026-04-01", "is_open": 1, "pretrade_date": "2026-03-31"},
+            ],
+            fund_nav_pit_daily=[{"entity_id": "E1", "trade_date": "2026-02-27", "available_date": "2026-02-28", "daily_return": 0.01, "assets_cny_mn": 100.0}],
+            fund_nav_daily_coverage_monthly=[],
+        )
+        incremental_dataset = DatasetSnapshot(
+            fund_entity_master=[{"entity_id": "E1", "entity_name": "基金甲", "primary_type": "主动股票"}],
+            fund_share_class_map=[{"entity_id": "E1", "share_class_id": "000001.OF", "share_class_name": "基金甲A", "is_primary_share_class": 1}],
+            fund_nav_monthly=[
+                {"entity_id": "E1", "month": "2026-02", "nav_date": "2026-02-27", "available_date": "2026-02-28", "nav": 1.0, "return_1m": 0.01, "assets_cny_mn": 100.0},
+                {"entity_id": "E1", "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-04-01", "nav": 1.1, "return_1m": 0.1, "assets_cny_mn": 110.0},
+            ],
+            benchmark_monthly=[
+                {"month": "2026-02", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.01},
+                {"month": "2026-03", "benchmark_key": "broad_equity", "benchmark_return_1m": 0.02},
+            ],
+            manager_assignment_monthly=[],
+            fund_type_audit=[{"entity_id": "E1", "primary_type": "主动股票", "confidence": "high"}],
+            metadata={"source_name": "tushare"},
+            fund_liquidity_audit=[{"entity_id": "E1", "liquidity_restricted": 0, "holding_lock_months": 0, "rule_code": "none"}],
+            trade_calendar=[
+                {"exchange": "SSE", "cal_date": "2026-02-27", "is_open": 1, "pretrade_date": "2026-02-26"},
+                {"exchange": "SSE", "cal_date": "2026-03-31", "is_open": 1, "pretrade_date": "2026-03-30"},
+                {"exchange": "SSE", "cal_date": "2026-04-01", "is_open": 1, "pretrade_date": "2026-03-31"},
+            ],
+            fund_nav_pit_daily=[
+                {"entity_id": "E1", "trade_date": "2026-02-27", "available_date": "2026-02-28", "daily_return": 0.01, "assets_cny_mn": 100.0},
+                {"entity_id": "E1", "trade_date": "2026-03-31", "available_date": "2026-04-01", "daily_return": 0.1, "assets_cny_mn": 110.0},
+            ],
+            fund_nav_daily_coverage_monthly=[],
+        )
+
+        with mock.patch("fund_research_v2.common.workflows.load_cached_dataset", return_value=primary_dataset):
+            persist_dataset(config, root, primary_dataset)
+        with mock.patch("fund_research_v2.common.workflows.load_cached_dataset", return_value=primary_dataset), mock.patch(
+            "fund_research_v2.common.workflows.fetch_incremental_dataset",
+            return_value=incremental_dataset,
+        ):
+            merge_incremental_command(config_path, "2026-03")
+
+        merged_nav_rows = read_csv(self._scoped_raw_dir(root, "tushare") / "fund_nav_monthly.csv")
+        summary = json.loads((self._scoped_raw_dir(root, "tushare") / "incremental_merge_summary.json").read_text(encoding="utf-8"))
+        nav_months = {(str(row["entity_id"]), str(row["month"])) for row in merged_nav_rows}
+        self.assertIn(("E1", "2026-03"), nav_months)
+        self.assertEqual(summary["target_month"], "2026-03")
+        self.assertEqual(summary["window_start"], "2026-02-01")
+        self.assertTrue((self._scoped_output_dir(root, "tushare", "result") / "incremental_merge_summary.json").exists())
+
+    def test_fetch_incremental_uses_existing_share_classes_without_fund_basic(self) -> None:
+        """验证轻量增量抓取基于主 raw 已有份额集合，不再调用 fund_basic 全量发现。"""
+        root = Path(tempfile.mkdtemp(prefix="fund-research-v2-"))
+        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        config_payload = self._base_config(root)
+        config_payload["data_source"] = "tushare"
+        config_payload["tushare"]["download_enabled"] = True
+        config_payload["tushare"]["use_cached_raw"] = False
+        config_payload["tushare"]["progress_every_entities"] = 1
+        config = load_config(self._write_config(root, config_payload))
+        import pandas as pd
+
+        provider = object.__new__(TushareDataProvider)
+        provider.project_root = root
+        provider.config = config
+        provider.pd = pd
+        provider._manager_df_cache = {}
+        provider._monthly_nav_cache = {}
+        provider._api_call_stats = defaultdict(lambda: {"calls": 0, "failures": 0, "elapsed_seconds": 0.0})
+        provider._api_error_samples = []
+        provider._api_last_call_at = {}
+        provider._api_min_interval_seconds = {}
+        provider._api_cache_hits = defaultdict(int)
+        provider._api_cache_misses = defaultdict(int)
+
+        class ClientLike:
+            def fund_basic(self, **_: object):
+                raise AssertionError("incremental fetch 不应调用 fund_basic")
+
+        provider.client = ClientLike()
+        provider._fetch_trade_calendar_rows_for_config = lambda: [  # type: ignore[method-assign]
+            {"exchange": "SSE", "cal_date": "2026-02-27", "is_open": 1, "pretrade_date": "2026-02-26"},
+            {"exchange": "SSE", "cal_date": "2026-03-31", "is_open": 1, "pretrade_date": "2026-03-30"},
+            {"exchange": "SSE", "cal_date": "2026-04-01", "is_open": 1, "pretrade_date": "2026-03-31"},
+        ]
+        provider._fetch_benchmark_rows = lambda month_set: [{"month": month, "benchmark_key": "broad_equity", "benchmark_return_1m": 0.01} for month in month_set]  # type: ignore[method-assign]
+        provider._build_manager_assignment_rows = lambda ts_code, entity_id, entity_nav_rows: [{"entity_id": entity_id, "month": "2026-03", "manager_name": "经理甲", "manager_start_month": "2024-01"}]  # type: ignore[method-assign]
+
+        def fake_fetch_entity_monthly_nav_rows(
+            rows: list[dict[str, object]],
+            entity_id: str,
+            trade_calendar_rows: list[dict[str, object]],
+        ) -> tuple[float, list[dict[str, object]], list[dict[str, object]]]:
+            self.assertEqual(len(rows), 1)
+            return 110.0, [
+                {"entity_id": entity_id, "trade_date": "2026-03-31", "available_date": "2026-04-01", "daily_return": 0.1, "assets_cny_mn": 110.0}
+            ], [
+                {"entity_id": entity_id, "month": "2026-03", "nav_date": "2026-03-31", "available_date": "2026-04-01", "nav": 1.1, "return_1m": 0.1, "assets_cny_mn": 110.0}
+            ]
+
+        provider._fetch_entity_monthly_nav_rows = fake_fetch_entity_monthly_nav_rows  # type: ignore[method-assign]
+        base_dataset = DatasetSnapshot(
+            fund_entity_master=[{"entity_id": "E1", "entity_name": "基金甲", "primary_type": "主动股票", "representative_share_class_id": "000001.OF"}],
+            fund_share_class_map=[{"entity_id": "E1", "share_class_id": "000001.OF", "share_class_name": "基金甲A", "is_primary_share_class": 1}],
+            fund_nav_monthly=[],
+            benchmark_monthly=[],
+            manager_assignment_monthly=[],
+            fund_type_audit=[{"entity_id": "E1", "primary_type": "主动股票", "confidence": "high"}],
+            metadata={"source_name": "tushare", "fund_type_audit_summary": {}, "fund_liquidity_audit_summary": {}, "field_status": {}},
+            fund_liquidity_audit=[{"entity_id": "E1", "liquidity_restricted": 0, "holding_lock_months": 0, "rule_code": "none"}],
+            trade_calendar=[],
+            fund_nav_pit_daily=[],
+            fund_nav_daily_coverage_monthly=[],
+        )
+
+        dataset = provider.fetch_incremental(
+            base_dataset,
+            target_month="2026-03",
+            window_start="2026-02-01",
+            window_end="2026-03-31",
+        )
+
+        self.assertEqual(len(dataset.fund_nav_monthly), 1)
+        self.assertEqual(str(dataset.fund_nav_monthly[0]["month"]), "2026-03")
+        self.assertEqual(dataset.metadata["incremental_fetch"]["mode"], "existing_share_classes_only")
 
     def test_api_call_uses_persisted_disk_cache(self) -> None:
         """验证单接口响应会落到磁盘缓存，并在新 provider 实例中直接命中。"""

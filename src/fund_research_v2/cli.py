@@ -10,6 +10,7 @@ from fund_research_v2.common.workflows import (
     compare_experiments_command,
     fetch_command,
     fetch_failed_command,
+    merge_incremental_command,
     run_backtest_command,
     run_experiment_command,
     run_feature_command,
@@ -29,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     for command_name in [
         "fetch",
         "fetch-failed",
+        "merge-incremental",
         "compare-experiments",
         "analyze-robustness",
         "audit-field-availability",
@@ -49,6 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
                 action="store_true",
                 help="跳过因子评估与最近两次实验对比刷新，只保留主链路产物。",
             )
+        if command_name == "merge-incremental":
+            command_parser.add_argument("--target-month", required=True, help="要合并的目标月份，格式 YYYY-MM。")
         if command_name == "serve-web":
             command_parser.add_argument("--host", default="127.0.0.1")
             command_parser.add_argument("--port", type=int, default=8000)
@@ -64,6 +68,7 @@ def main() -> int:
     command_map = {
         "fetch": fetch_command,
         "fetch-failed": fetch_failed_command,
+        "merge-incremental": merge_incremental_command,
         "compare-experiments": compare_experiments_command,
         "analyze-robustness": analyze_robustness_command,
         "audit-field-availability": audit_field_availability_command,
@@ -79,6 +84,9 @@ def main() -> int:
         return 0
     if args.command == "run-experiment":
         run_experiment_command(config_path, fast_mode=bool(getattr(args, "fast", False)))
+        return 0
+    if args.command == "merge-incremental":
+        merge_incremental_command(config_path, str(args.target_month))
         return 0
     command_map[args.command](config_path)
     return 0

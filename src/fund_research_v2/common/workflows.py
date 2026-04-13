@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace
+import shutil
 import subprocess
 from pathlib import Path
 from time import perf_counter
@@ -10,7 +12,8 @@ from fund_research_v2.backtest.engine import prepare_backtest_execution_cache, r
 from fund_research_v2.common.config import AppConfig, config_fingerprint, load_config, scope_artifact_dir, to_serializable_dict
 from fund_research_v2.common.date_utils import current_timestamp, is_rebalance_month, latest_completed_month
 from fund_research_v2.common.io_utils import append_jsonl, ensure_directories, write_csv, write_json
-from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, load_dataset, warm_failed_api_cache
+from fund_research_v2.data_ingestion.providers import fetch_and_cache_dataset, fetch_incremental_dataset, load_cached_dataset, load_dataset, persist_dataset, warm_failed_api_cache
+from fund_research_v2.data_ingestion.raw_merger import incremental_window_for_target_month, merge_tushare_incremental_snapshot
 from fund_research_v2.evaluation.experiment_comparator import build_experiment_comparison, load_portfolio_snapshot, read_experiment_records
 from fund_research_v2.evaluation.candidate_validation import build_candidate_validation
 from fund_research_v2.evaluation.field_availability import build_field_availability_audit
@@ -62,6 +65,52 @@ def fetch_failed_command(config_path: Path) -> None:
     result_dir = artifact_dir(config, project_root, config.paths.result_dir)
     write_json(result_dir / "fetch_retry_summary.json", refresh_result)
     render_fetch_retry_report(report_dir / "fetch_retry_report.md", refresh_result)
+
+
+def merge_incremental_command(config_path: Path, target_month: str) -> None:
+    """抓取目标月增量窗口，并按主键 upsert 合并回主 tushare raw。"""
+    config = load_config(config_path)
+    if config.data_source != "tushare":
+        raise RuntimeError("merge-incremental 仅支持 tushare 数据源。")
+    project_root = resolve_project_root(config_path)
+    ensure_directories(all_artifact_dirs(config, project_root))
+    primary_dataset = load_cached_dataset(config, project_root)
+    if primary_dataset is None:
+        raise RuntimeError("当前主 raw 缓存不存在，不能执行增量合并。请先运行一次 fetch-tushare。")
+    window_start, window_end = incremental_window_for_target_month(target_month)
+    temp_raw_base = Path("data") / "raw_incremental" / target_month.replace("-", "")
+    incremental_config = _build_incremental_fetch_config(
+        config,
+        target_month=target_month,
+        window_start=window_start,
+        window_end=window_end,
+        temp_raw_base=temp_raw_base,
+    )
+    ensure_directories(all_artifact_dirs(incremental_config, project_root))
+    incremental_dataset = fetch_incremental_dataset(
+        incremental_config,
+        project_root,
+        primary_dataset,
+        target_month=target_month,
+        window_start=window_start,
+        window_end=window_end,
+    )
+    temp_raw_dir = artifact_dir(incremental_config, project_root, incremental_config.paths.raw_dir)
+    merged_dataset, merge_summary = merge_tushare_incremental_snapshot(
+        config=config,
+        primary_dataset=primary_dataset,
+        incremental_dataset=incremental_dataset,
+        target_month=target_month,
+        window_start=window_start,
+        window_end=window_end,
+        temp_raw_dir=temp_raw_dir,
+    )
+    persist_dataset(config, project_root, merged_dataset)
+    raw_dir = artifact_dir(config, project_root, config.paths.raw_dir)
+    result_dir = artifact_dir(config, project_root, config.paths.result_dir)
+    merge_summary["api_cache_files_copied"] = _merge_incremental_api_cache(temp_raw_dir, raw_dir)
+    write_json(raw_dir / "incremental_merge_summary.json", merge_summary)
+    write_json(result_dir / "incremental_merge_summary.json", merge_summary)
 
 
 def compare_experiments_command(config_path: Path) -> None:
@@ -296,6 +345,41 @@ def prepare_bundle(config_path: Path) -> dict[str, object]:
         "score_rows": score_rows,
         "prepared_execution_cache": prepared_execution_cache,
     }
+
+
+def _build_incremental_fetch_config(
+    config: AppConfig,
+    *,
+    target_month: str,
+    window_start: str,
+    window_end: str,
+    temp_raw_base: Path,
+) -> AppConfig:
+    """基于主配置构造一份临时增量抓取配置。"""
+    temp_paths = replace(config.paths, raw_dir=temp_raw_base)
+    temp_tushare = replace(
+        config.tushare,
+        download_enabled=True,
+        use_cached_raw=False,
+        start_date=window_start.replace("-", ""),
+        end_date=window_end.replace("-", ""),
+    )
+    as_of_date = max(config.as_of_date, window_end)
+    return replace(config, as_of_date=as_of_date, tushare=temp_tushare, paths=temp_paths)
+
+
+def _merge_incremental_api_cache(temp_raw_dir: Path, primary_raw_dir: Path) -> int:
+    """把增量抓到的单接口缓存并回主 raw api_cache。"""
+    source_dir = temp_raw_dir / "api_cache"
+    if not source_dir.exists():
+        return 0
+    target_dir = primary_raw_dir / "api_cache"
+    ensure_directories([target_dir])
+    copied = 0
+    for path in source_dir.glob("*.json"):
+        shutil.copy2(path, target_dir / path.name)
+        copied += 1
+    return copied
 
 
 def _emit_timing(stage: str, elapsed_seconds: float) -> None:
