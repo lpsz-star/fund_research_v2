@@ -86,8 +86,8 @@
 11. [docs/baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)
 12. [docs/candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)
 13. [docs/config_governance.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/config_governance.md)
-14. [docs/error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)
-15. [docs/changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)
+14. [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/error_log.md)
+15. [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/changes.md)
 
 这些文档分别覆盖：
 - 系统分层和模块职责
@@ -113,8 +113,8 @@
 - [baseline_upgrade_checklist.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/baseline_upgrade_checklist.md)：候选评分是否升级为默认 baseline 的决策清单
 - [candidate_validation_spec.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/candidate_validation_spec.md)：A/B 两项候选基线验证的输出契约与当前决策规则
 - [config_governance.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/config_governance.md)：baseline、candidate、archive 三层配置结构与维护规则
-- [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md)：已确认错误、根因、修复方案与影响范围
-- [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)：主线迭代的变更记录
+- [error_log.md](/Users/liupeng/.codex/projects/fund_research_v2/error_log.md)：已确认错误、根因、修复方案与影响范围
+- [changes.md](/Users/liupeng/.codex/projects/fund_research_v2/changes.md)：主线迭代的变更记录
 
 
 当前 `outputs/<data_source>/` 目录也已按产物职责进一步分层：

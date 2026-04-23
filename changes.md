@@ -2,6 +2,26 @@
 
 本文档按主题记录已经落地的主要改动，重点说明“改了什么”以及“为什么改”。
 
+## 2026-04-13
+
+### 1. 主配置回测起点统一前移至 2022-12
+
+- 变更内容：
+  - [`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)、[`configs/candidates/tushare_scoring_v5_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_candidate.json)、[`configs/candidates/tushare_scoring_v5_quarterly_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_quarterly_candidate.json) 和 [`configs/default.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/default.json) 的 `backtest.start_month` 统一从 `2023-01` 调整为 `2022-12`。
+  - `configs/archive/` 下的历史研究配置保持不变，继续保留原始回测区间，避免破坏历史实验可复现性。
+- 目的：
+  - 让 baseline、当前 candidate、季度 candidate 和 sample 主入口在默认回测区间上保持一致，避免后续对比出现样本期不一致。
+  - 这次调整只改变新实验的样本起点，不改变基金池、因子、调仓频率、执行时点、成本假设等策略语义。
+
+### 2. 主配置默认交易手续费上调至 0.15%
+
+- 变更内容：
+  - [`configs/tushare.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/tushare.json)、[`configs/candidates/tushare_scoring_v5_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_candidate.json)、[`configs/candidates/tushare_scoring_v5_quarterly_candidate.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/candidates/tushare_scoring_v5_quarterly_candidate.json) 和 [`configs/default.json`](/Users/liupeng/.codex/projects/fund_research_v2/configs/default.json) 的 `backtest.transaction_cost_bps` 统一从 `10.0` 调整为 `15.0`。
+  - `configs/archive/` 下的历史研究配置保持不变，继续保留原始成本假设，避免破坏历史实验可复现性。
+- 目的：
+  - 把主入口默认回测成本假设更新为 `0.15%`，用于后续新实验结果。
+  - 这次调整只改变回测成本假设，不改变基金池、因子、调仓频率、执行时点和权重生成方式。
+
 ## 2026-04-08
 
 ### 1. 新增季度调仓候选配置与显式调仓频率开关
@@ -414,7 +434,7 @@
 
 - 变更内容：
   - 新增缓存校验、组合输出、基金池审计、实体规模汇总等回归测试。
-  - 新增 [`docs/error_log.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md) 与 [`docs/changes.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)。
+  - 新增 [`error_log.md`](/Users/liupeng/.codex/projects/fund_research_v2/error_log.md) 与 [`changes.md`](/Users/liupeng/.codex/projects/fund_research_v2/changes.md)。
 - 目的：
   - 让本轮迭代具备更好的可验证性和可追踪性。
 
@@ -714,4 +734,3 @@
   - [`data_contracts.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/data_contracts.md) 与 [`experiment_guide.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/experiment_guide.md) 同步补充新产物说明。
 - 目的：
   - 让现有单因子评价不再只是统计展示，而是能直接支撑因子准入、观察层保留和淘汰判断。
-

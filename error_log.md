@@ -84,7 +84,7 @@
 - 影响模块：
   - 协作文档流程
 - 现象：
-  - 在多轮开发后，仓库中缺少 [`docs/error_log.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/error_log.md) 与 [`docs/changes.md`](/Users/liupeng/.codex/projects/fund_research_v2/docs/changes.md)。
+  - 在多轮开发后，仓库中缺少 [`error_log.md`](/Users/liupeng/.codex/projects/fund_research_v2/error_log.md) 与 [`changes.md`](/Users/liupeng/.codex/projects/fund_research_v2/changes.md)。
 - 根因：
   - 执行过程中把这两个文档错误地视为“可后补”，没有把 `AGENTS.md` 的文档要求当成强约束执行。
 - 修复方案：

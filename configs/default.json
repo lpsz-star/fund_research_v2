@@ -24,10 +24,10 @@
     "single_company_max": 2
   },
   "backtest": {
-    "start_month": "2023-01",
+    "start_month": "2022-12",
     "end_month": "2026-02",
     "benchmark_field": "benchmark_return_1m",
-    "transaction_cost_bps": 10.0,
+    "transaction_cost_bps": 15.0,
     "missing_return_policy": "zero_fill_legacy",
     "missing_weight_warning_threshold": 0.05
   },
